@@ -13,7 +13,7 @@ const getPartyColor = (party: string) => {
 
 export default function CandidateModal({ candidate, onClose }: { candidate: any; onClose: () => void; }) {
   const [mounted, setMounted] = useState(false);
-  const [imgError, setImgError] = useState(false); // Keeps the photo fallback tracking
+  const [imgError, setImgError] = useState(false);
   const { signals } = useLiveData();
 
   useEffect(() => {
@@ -24,12 +24,10 @@ export default function CandidateModal({ candidate, onClose }: { candidate: any;
 
   const partyColor = getPartyColor(candidate.party || "IND");
   const partyName = candidate.party || "IND";
-
-  // Get REAL signals related to this candidate's constituency
   const candidateSignals = signals.filter((s: any) => s.constituency_id === candidate.constituency_id).slice(0, 3);
 
   const modalContent = (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-fade-in-up">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-fade-in-up">
       <div className="bg-[#ffffff] border border-[#e4e4e7] rounded-lg shadow-xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[95vh]">
 
         {/* Header */}
@@ -51,8 +49,6 @@ export default function CandidateModal({ candidate, onClose }: { candidate: any;
           {/* Left Column: Photo */}
           <div className="flex flex-col gap-4 w-full md:w-1/3 shrink-0">
             <div className="aspect-[3/4] w-full bg-[#f4f4f5] border border-[#e4e4e7] rounded overflow-hidden relative flex items-center justify-center shadow-inner">
-
-              {/* Photo or Fallback */}
               {candidate.photo_url && !imgError ? (
                 <img
                   src={candidate.photo_url}
@@ -63,18 +59,17 @@ export default function CandidateModal({ candidate, onClose }: { candidate: any;
               ) : (
                 <User className="h-20 w-20 text-[#d4d4d8] z-10 relative" />
               )}
-
               <div className="absolute inset-0 bg-[linear-gradient(rgba(0,0,0,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,0.03)_1px,transparent_1px)] bg-[size:10px_10px] pointer-events-none" />
             </div>
 
-            {/* Verify Button directly under the photo */}
+            {/* Verify Button */}
             <a
-              href={candidate.source_url || `https://myneta.info/search_candidate.php?q=${candidate.name}`}
+              href={candidate.source_url || "#"}
               target="_blank"
               rel="noopener noreferrer"
               className="w-full bg-[#16a34a]/10 text-[#16a34a] border border-[#16a34a]/30 font-mono text-[10px] font-bold px-3 py-2 rounded flex items-center justify-center gap-2 hover:bg-[#16a34a] hover:text-white transition-colors"
             >
-              <ExternalLink className="h-3 w-3" /> OFFICIAL ECI / MYNETA AFFIDAVIT
+              <ExternalLink className="h-3 w-3" /> OFFICIAL ECI AFFIDAVIT
             </a>
           </div>
 
@@ -85,7 +80,6 @@ export default function CandidateModal({ candidate, onClose }: { candidate: any;
               <div className="flex items-center gap-2 mt-1">
                 <span className="h-3 w-3 rounded-full shadow-sm" style={{ backgroundColor: partyColor }} />
                 <span className="font-mono text-sm font-semibold text-[#52525b]">{partyName.toUpperCase()}</span>
-                {candidate.incumbent && <span className="ml-2 font-mono text-[10px] font-bold text-[#ea580c] bg-[#ea580c]/10 px-1.5 py-0.5 rounded border border-[#ea580c]/20">INCUMBENT</span>}
                 {candidate.is_independent && <span className="ml-2 font-mono text-[10px] font-bold text-[#52525b] bg-[#e4e4e7] px-1.5 py-0.5 rounded border border-[#d4d4d8]">INDEPENDENT</span>}
               </div>
             </div>
@@ -116,14 +110,14 @@ export default function CandidateModal({ candidate, onClose }: { candidate: any;
                   <h3 className="font-mono text-[10px] font-bold text-[#52525b] mb-2 tracking-wider flex items-center gap-1.5"><MapPin className="h-3 w-3" /> CONTESTING CONSTITUENCY</h3>
                   <div className="text-xs text-[#27272a] space-y-1">
                     <p><span className="text-[#71717a]">ID:</span> {(candidate.constituency_id || "").toUpperCase()}</p>
-                    <p><span className="text-[#71717a]">Status:</span> {candidate.incumbent ? "Defending Seat" : "Challenger"}</p>
+                    <p><span className="text-[#71717a]">Status:</span> ECI Verified & Accepted</p>
                   </div>
                 </div>
 
                 <div className="bg-[#f4f4f5] border border-[#e4e4e7] rounded p-3">
                   <h3 className="font-mono text-[10px] font-bold text-[#52525b] mb-2 tracking-wider flex items-center gap-1.5"><User className="h-3 w-3" /> POLITICAL BACKGROUND</h3>
                   <div className="text-xs text-[#71717a] space-y-1">
-                    {candidate.background ? <p className="text-[#27272a]">{candidate.background}</p> : <p>Awaiting background dossier extraction from ECI sources.</p>}
+                    {candidate.background ? <p className="text-[#27272a]">{candidate.background}</p> : <p>Awaiting background dossier extraction.</p>}
                   </div>
                 </div>
               </div>

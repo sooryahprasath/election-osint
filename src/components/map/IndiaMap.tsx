@@ -262,7 +262,7 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
 
           // CLEAN WHITE THEME VIDEO BOX
           const videoIcon = L.divIcon({
-            className: "bg-transparent cursor-pointer transition-transform hover:scale-110",
+            className: "bg-transparent cursor-pointer",
             html: `
               <div style="position: relative; width: 64px; height: 40px; border-radius: 4px; overflow: hidden; border: 2px solid #ffffff; box-shadow: 0 4px 6px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; background: #e4e4e7;">
                 <img src="${thumbnailUrl}" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;" />

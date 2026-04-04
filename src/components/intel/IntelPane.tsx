@@ -25,20 +25,20 @@ export default function IntelPane({
   const [sortMode, setSortMode] = useState<SortMode>("VOLATILITY");
   const { constituencies } = useLiveData();
 
-  const activeState = globalStateFilter === "ALL" ? "Kerala" : globalStateFilter;
+  // FIX: Do not force "Kerala" if ALL is selected
+  const activeState = globalStateFilter;
 
-  const stateConstituencies = constituencies.filter(
-    (c: any) => c.state === activeState
-  );
+  // FIX: If ALL is selected, show all constituencies, else filter by state
+  const stateConstituencies = activeState === "ALL"
+    ? constituencies
+    : constituencies.filter((c: any) => c.state === activeState);
 
   const selectedConstituency = globalConstituencyId
     ? constituencies.find((c: any) => c.id === globalConstituencyId) || null
     : null;
 
   const filtered = searchQuery
-    ? stateConstituencies.filter((c) =>
-      c.name.toLowerCase().includes(searchQuery.toLowerCase())
-    )
+    ? stateConstituencies.filter((c) => c.name.toLowerCase().includes(searchQuery.toLowerCase()))
     : stateConstituencies;
 
   const sorted = [...filtered].sort((a, b) => {
@@ -52,16 +52,11 @@ export default function IntelPane({
     return (
       <aside className="flex flex-col h-full w-full overflow-hidden bg-[#ffffff] border-l border-[#e4e4e7]">
         <div className="flex items-center gap-2 px-3 py-2 border-b border-[#e4e4e7] shrink-0">
-          <button
-            onClick={() => setGlobalConstituencyId(null)}
-            className="font-mono text-[10px] text-[#16a34a] hover:text-[#16a34a]/80 transition-colors"
-          >
+          <button onClick={() => setGlobalConstituencyId(null)} className="font-mono text-[10px] text-[#16a34a] hover:text-[#16a34a]/80 transition-colors">
             ← BACK
           </button>
           <span className="font-mono text-[10px] text-[#71717a]">/</span>
-          <span className="font-mono text-[10px] text-[#52525b] truncate">
-            {selectedConstituency.name.toUpperCase()}
-          </span>
+          <span className="font-mono text-[10px] text-[#52525b] truncate">{selectedConstituency.name.toUpperCase()}</span>
         </div>
         <div className="flex-1 overflow-y-auto">
           <ConstituencyCard constituency={selectedConstituency} />
@@ -80,11 +75,7 @@ export default function IntelPane({
         <span className="font-mono text-[10px] text-[#71717a]">{sorted.length} RESULTS</span>
       </div>
 
-
-
-      {/* State Tabs */}
       <div className="flex border-b border-[#e4e4e7] overflow-x-auto shrink-0 bg-[#f8fafc]">
-        {/* The National Reset Button */}
         <button
           onClick={() => {
             setGlobalStateFilter("ALL");
@@ -101,7 +92,6 @@ export default function IntelPane({
           ALL
         </button>
 
-        {/* The State Buttons */}
         {Array.from(new Set(constituencies.map((c: any) => c.state))).map((state: any) => {
           const meta = STATE_META[state];
           const isActive = activeState === state;
@@ -167,17 +157,11 @@ export default function IntelPane({
           >
             <div
               className="h-6 w-1 rounded-full mr-2.5 shrink-0"
-              style={{
-                backgroundColor:
-                  (c.volatility_score || 0) >= 80 ? "#dc2626" :
-                    (c.volatility_score || 0) >= 40 ? "#ea580c" : "#16a34a",
-              }}
+              style={{ backgroundColor: (c.volatility_score || 0) >= 70 ? "#dc2626" : (c.volatility_score || 0) >= 40 ? "#ea580c" : "#16a34a" }}
             />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <span className="font-mono text-[10px] text-[#27272a] truncate group-hover:text-[#16a34a] transition-colors">
-                  {c.name}
-                </span>
+                <span className="font-mono text-[10px] text-[#27272a] truncate group-hover:text-[#16a34a] transition-colors">{c.name}</span>
                 <span className="font-mono text-[8px] text-[#71717a] shrink-0">#{c.id?.split('-')[1] || "0"}</span>
               </div>
               <div className="flex items-center gap-2 mt-0.5">
