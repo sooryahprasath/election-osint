@@ -1,65 +1,58 @@
-🇮🇳 Project Dharma-OSINT
-Real-Time Situational Awareness for the 2026 Indian State Elections
-Project Dharma is a lightweight, high-performance OSINT (Open-Source Intelligence) dashboard designed to fuse real-time election data, candidate dossiers, and live "signal" updates into a unified tactical interface. Inspired by military situational awareness tools and the work of Bilawal Sidhu, this platform provides a "Command Center" view of the 2026 assembly elections in Kerala, Assam, West Bengal, and Tamil Nadu.
+# 🇮🇳 Project Dharma-OSINT
+### "Situational Awareness for the 2026 Indian State Elections"
 
-🛰️ Intelligence Architecture
-The system operates on a multi-layered Data Fusion model:
+[![Next.js 15](https://img.shields.io/badge/Frontend-Next.js%2015-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
+[![Leaflet.js](https://img.shields.io/badge/Maps-Leaflet.js-green?style=for-the-badge&logo=leaflet)](https://leafletjs.org/)
+[![Supabase](https://img.shields.io/badge/Database-Supabase-3ECF8E?style=for-the-badge&logo=supabase)](https://supabase.com/)
+[![Gemini 1.5 Pro](https://img.shields.io/badge/AI-Gemini%201.5%20Pro-blue?style=for-the-badge&logo=google-gemini)](https://ai.google.dev/)
 
-The Signal Layer: Autonomous Python workers (osint_workers/) monitor news feeds and social media. They use Gemini AI to categorize sentiment and extract geographic entities.
+**Project Dharma** is a real-time Open-Source Intelligence (OSINT) dashboard designed to combat information fragmentation during the 2026 Indian State Elections (Kerala, Assam, West Bengal, Tamil Nadu). 
 
-The Dossier Layer: Real-time scrapers pull verified candidate data from ECI and MyNeta, generating instant "Dossier Files" containing wealth, education, and criminal records.
+Inspired by the high-density tactical displays of military "War Rooms" and the methodology of **Bilawal Sidhu's World Monitor**, this platform fuses live news, verified candidate dossiers, and geospatial data into a single, actionable 2D/3D interface.
 
-The Tactical Layer: A responsive Leaflet map renders constituency boundaries (GeoJSON) and overlays live pulse-markers for incidents, rallies, and polling trends.
+---
 
-🛠️ Tech Stack
-Frontend: Next.js 15+ (App Router), Tailwind CSS.
+## 🛰️ Intelligence Architecture: The "Data Fusion" Model
 
-Map Engine: Leaflet.js with custom tactical dark-mode styling.
+Unlike standard election trackers, Dharma operates as a **Situational Awareness Tool**:
 
-Backend: Supabase (PostgreSQL + Real-time WebSocket Listeners).
+1.  **The Signal Layer (Autonomous Workers):** Python-based agents (`osint_workers/`) monitor regional RSS feeds and social media. They utilize **Gemini 1.5 Pro** to perform real-time entity extraction, sentiment analysis, and geographic geocoding.
+2.  **The Dossier Layer (Deep-Dive Intel):** A custom scraper engine pulls affidavits from the **Election Commission of India (ECI)** and financial/criminal data from **MyNeta (ADR India)**. Every candidate is assigned a unique "Dossier File" with direct source verification links.
+3.  **The Tactical Layer (Visual Engine):** A dark-themed **Leaflet.js** map renders constituency boundaries via GeoJSON and overlays live "Pulse Markers." Green markers indicate standard updates; Red pulsing markers indicate high-severity signals (e.g., MCC violations or localized unrest).
 
-Authentication: Clerk (Social & Dossier-access control).
+---
 
-Intelligence Workers: Python 3.11 (BeautifulSoup, Playwright).
+## 🛠️ The Tech Stack
 
-AI Core: Gemini 1.5 Pro (via Google AI Studio).
+| Component | Technology |
+| :--- | :--- |
+| **Framework** | Next.js 15 (App Router) |
+| **Styling** | Tailwind CSS (Tactical/Cyberpunk UI) |
+| **Map Engine** | Leaflet.js (Lightweight & High-Performance) |
+| **Backend** | Supabase (PostgreSQL + Real-time WebSockets) |
+| **AI Orchestration** | Gemini 1.5 Pro via Google AI Studio |
+| **Workers** | Python 3.11 (BeautifulSoup, Playwright) |
 
-🚀 Rapid Implementation
-1. Initialize the Intelligence Hub (Supabase)
-Execute the SQL migrations found in src/lib/supabase/schema.sql to set up your tables:
+---
 
-constituencies: Geographic boundaries and status.
+## 🚀 Speed-to-Ship: How it was Built
 
-candidates: Deep-dive dossiers.
+This project is a product of **"Vibe Coding"**—the process of using high-level architectural intent and AI agents to build complex systems at lightning speed.
 
-signals: Real-time news and incident alerts.
+* **Build Time:** 72 Hours (Weekend Sprint).
+* **Methodology:** Utilizing **Google Antigravity** and **Gemini Pro** to orchestrate the multi-file refactoring required to transition from a mockup to a live intelligence tool.
+* **The "Bilawal" Influence:** The UI focuses on **Information Density**. Every pixel is designed to provide utility, from the "Morning Briefing" news summaries to the "Constituency Intel" sidebar.
 
-2. Configure Environment
-Create a .env.local in the root directory:
+---
 
-Code snippet
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_key
-GEMINI_API_KEY=your_google_ai_studio_key
-3. Deploy the Tactical Frontend
-Bash
-npm install
-npm run dev
-4. Ignite the OSINT Workers
-Bash
-cd osint_workers
-pip install -r requirements.txt
-python signal_ingestor.py
-📡 Roadmap
-[x] Leaflet Integration: High-performance constituency boundary rendering.
+## 🏁 Implementation Guide
 
-[x] Dossier System: Interactive candidate modals with ECI/MyNeta source links.
+### 1. Database Initialization
+Execute the SQL scripts in `src/lib/supabase/schema.sql` to initialize your Supabase instance with the required tables for `candidates`, `constituencies`, and `signals`.
 
-[x] Live Ticker: Real-time signal feed with automatic map focus.
-
-[ ] Swing Engine: Logic for calculating victory margins on Counting Day (May 4, 2026).
-
-[ ] Protest Tracking: Correlating signal density with physical geography to predict volatility hotspots.
-
-💡 Origin & Inspiration
-This project was built during a 72-hour "Vibe Coding" sprint, utilizing Google Antigravity and Gemini Pro to orchestrate complex data flows between government affidavits and geospatial visualizations. It serves as a proof-of-concept for how bedroom-startup stacks can rival institutional intelligence tools like Palantir.
+### 2. Environment Setup
+Create a `.env.local` file:
+```env
+NEXT_PUBLIC_SUPABASE_URL=your_project_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
+GEMINI_API_KEY=your_ai_studio_key
