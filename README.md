@@ -56,3 +56,14 @@ Create a `.env.local` file:
 NEXT_PUBLIC_SUPABASE_URL=your_project_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
 GEMINI_API_KEY=your_ai_studio_key
+
+### 3. Ignition
+
+# Start the Dashboard
+npm install
+npm run dev
+
+# Activate the Intelligence Workers
+cd osint_workers
+pip install -r requirements.txt
+python signal_ingestor.py
