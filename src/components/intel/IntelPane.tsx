@@ -80,7 +80,28 @@ export default function IntelPane({
         <span className="font-mono text-[10px] text-[#71717a]">{sorted.length} RESULTS</span>
       </div>
 
-      <div className="flex border-b border-[#e4e4e7] overflow-x-auto shrink-0">
+
+
+      {/* State Tabs */}
+      <div className="flex border-b border-[#e4e4e7] overflow-x-auto shrink-0 bg-[#f8fafc]">
+        {/* The National Reset Button */}
+        <button
+          onClick={() => {
+            setGlobalStateFilter("ALL");
+            setSearchQuery("");
+            setGlobalConstituencyId(null);
+          }}
+          style={{
+            color: activeState === "ALL" ? "#16a34a" : "#71717a",
+            borderBottomColor: activeState === "ALL" ? "#16a34a" : "transparent",
+            backgroundColor: activeState === "ALL" ? "#16a34a15" : "transparent"
+          }}
+          className="flex-1 min-w-[50px] px-2 py-1.5 font-mono text-[10px] font-bold transition-colors border-b-2 hover:bg-[#f4f4f5]"
+        >
+          ALL
+        </button>
+
+        {/* The State Buttons */}
         {Array.from(new Set(constituencies.map((c: any) => c.state))).map((state: any) => {
           const meta = STATE_META[state];
           const isActive = activeState === state;
@@ -97,7 +118,7 @@ export default function IntelPane({
                 borderBottomColor: isActive ? meta.color : "transparent",
                 backgroundColor: isActive ? `${meta.color}10` : "transparent"
               }}
-              className="flex-1 min-w-0 px-2 py-1.5 font-mono text-[10px] font-bold transition-colors border-b-2 hover:bg-[#f4f4f5]"
+              className="flex-1 min-w-[40px] px-2 py-1.5 font-mono text-[10px] font-bold transition-colors border-b-2 hover:bg-[#f4f4f5]"
             >
               <div className="truncate">{meta?.abbr || state}</div>
             </button>

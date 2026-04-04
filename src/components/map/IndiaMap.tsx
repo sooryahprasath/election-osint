@@ -215,11 +215,12 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
       m.addTo(markersGroupRef.current!);
     });
 
-    signals.forEach((s: any) => {
+    signals.forEach((s: any, index: number) => {
       if (activeState !== "ALL" && s.state !== activeState && s.state) return;
 
       let lat = s.latitude;
       let lng = s.longitude;
+      let isFallback = false;
 
       // Coordinate Fallback Logic
       if (!lat && s.constituency_id) {
@@ -228,6 +229,7 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
       }
 
       if (!lat) {
+        isFallback = true;
         if (s.state && FALLBACK_COORDS[s.state]) {
           lat = FALLBACK_COORDS[s.state][0];
           lng = FALLBACK_COORDS[s.state][1];
@@ -238,7 +240,16 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
       }
 
       if (lat && lng) {
-        // Dynamic Border Colors
+        // JITTER ALGORITHM: If this is a fallback coordinate, scatter it so videos don't stack perfectly on top of each other
+        if (isFallback) {
+          // We use the index to mathematically spread them in a circle around the capital
+          const angle = index * (Math.PI / 4);
+          const distance = 0.5 + (index % 3) * 0.3; // between 0.5 and 1.1 degrees away
+          lat += Math.cos(angle) * distance;
+          lng += Math.sin(angle) * distance;
+        }
+
+        // Clean UI Border Colors
         let borderColor = "#3b82f6"; // Default Blue
         if (s.severity >= 4 || s.category === 'breaking') borderColor = "#dc2626";
         else if (s.severity === 3 || s.category === 'alert') borderColor = "#ea580c";
@@ -249,25 +260,27 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
           const videoId = videoIdMatch ? videoIdMatch[1] : null;
           const thumbnailUrl = videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : "";
 
+          // CLEAN WHITE THEME VIDEO BOX
           const videoIcon = L.divIcon({
             className: "bg-transparent cursor-pointer transition-transform hover:scale-110",
             html: `
-              <div style="position: relative; width: 64px; height: 40px; border-radius: 6px; overflow: hidden; border: 2px solid ${borderColor}; box-shadow: 0 0 15px ${borderColor}80; display: flex; align-items: center; justify-content: center; background: #000;">
-                <img src="${thumbnailUrl}" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.8;" />
-                <div style="background: #ef4444; color: white; width: 22px; height: 16px; border-radius: 4px; display: flex; align-items: center; justify-content: center; z-index: 10; font-size: 9px;">▶</div>
+              <div style="position: relative; width: 64px; height: 40px; border-radius: 4px; overflow: hidden; border: 2px solid #ffffff; box-shadow: 0 4px 6px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; background: #e4e4e7;">
+                <img src="${thumbnailUrl}" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;" />
+                <div style="background: ${borderColor}; color: white; width: 20px; height: 14px; border-radius: 3px; display: flex; align-items: center; justify-content: center; z-index: 10; font-size: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.5);">▶</div>
               </div>
             `,
             iconSize: [64, 40]
           });
-          const sm = L.marker([lat, lng], { icon: videoIcon });
-          sm.bindTooltip(`<b style="color:${borderColor}; font-family: monospace;">[VIDEO INTEL]</b><br/><span style="font-size: 10px;">${s.title.substring(0, 40)}...</span>`, { direction: "right", offset: L.point(35, 0) });
+          const sm = L.marker([lat, lng], { icon: videoIcon, zIndexOffset: 1000 });
+          sm.bindTooltip(`<b style="color:${borderColor}; font-family: monospace;">[VIDEO INTEL]</b><br/><span style="font-size: 10px;">${s.title.substring(0, 40)}...</span>`, { direction: "top", offset: L.point(0, -20) });
           if (onSelectSignal) sm.on("click", () => onSelectSignal(s));
           sm.addTo(markersGroupRef.current!);
         }
         else if (s.severity >= 3 || s.category === 'official') {
+          // Normal Radar Blip
           const radarIcon = L.divIcon({
             className: "bg-transparent cursor-pointer",
-            html: `<div style="position: relative; width: 24px; height: 24px; transform: translate(-50%, -50%);"><div style="position: absolute; inset: 0; border-radius: 50%; background: ${borderColor}99; animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;"></div><div style="position: absolute; top: 50%; left: 50%; width: 8px; height: 8px; border-radius: 50%; background: ${borderColor}; transform: translate(-50%, -50%); box-shadow: 0 0 8px ${borderColor};"></div></div>`,
+            html: `<div style="position: relative; width: 24px; height: 24px; transform: translate(-50%, -50%);"><div style="position: absolute; inset: 0; border-radius: 50%; background: ${borderColor}99; animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;"></div><div style="position: absolute; top: 50%; left: 50%; width: 8px; height: 8px; border-radius: 50%; background: ${borderColor}; transform: translate(-50%, -50%); box-shadow: 0 0 4px rgba(0,0,0,0.3); border: 1px solid #ffffff;"></div></div>`,
             iconSize: [0, 0]
           });
           const sm = L.marker([lat, lng], { icon: radarIcon });

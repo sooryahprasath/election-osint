@@ -27,6 +27,7 @@ except Exception as e:
     supabase = None
 
 FEEDS = {
+    "ANI_News": "https://aninews.in/rss-feed/"
     "Kerala": "https://news.google.com/rss/search?q=Kerala+Election+2026+when:1d&hl=en-IN&gl=IN&ceid=IN:en",
     "Assam": "https://news.google.com/rss/search?q=Assam+Election+2026+when:1d&hl=en-IN&gl=IN&ceid=IN:en",
     "Tamil_Nadu": "https://news.google.com/rss/search?q=Tamil+Nadu+Election+2026+when:1d&hl=en-IN&gl=IN&ceid=IN:en",
@@ -151,11 +152,24 @@ def fetch_and_ingest():
     for state_name, url in FEEDS.items():
         try:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:3]:
+            for entry in feed.entries[:4]:
+                title = entry.title
                 link = entry.link
-                full_text, image_url = extract_article_data(link, getattr(entry, 'summary', ''))
+                summary_html = getattr(entry, 'summary', '')
+                source_name = getattr(entry.source, 'title', 'News') if hasattr(entry, 'source') else "News Network"
+                
+                # PRE-FILTER: Ensure it's actually about elections/politics before burning Gemini tokens
+                search_text = (title + " " + summary_html).lower()
+                keywords =["election", "poll", "vote", "congress", "bjp", "cpi", "tmc", "dmk", "rally", "clash", "eci", "candidate"]
+                
+                if not any(k in search_text for k in keywords):
+                    print(f"   ->[IGNORED] Not election related: {title[:40]}...")
+                    continue
+
+                print(f"-> Found: {title[:60]}...")
+                full_text, image_url = extract_article_data(link, summary_html)
                 if len(full_text) > 50: 
-                    analyze_and_insert(getattr(entry.source, 'title', 'News'), link, entry.title, full_text, image_url, state_name, valid_c_ids)
+                    analyze_and_insert(source_name, link, title, full_text, image_url, state_name, valid_c_ids)
         except Exception: pass
     generate_ai_briefing()
 
