@@ -1,26 +1,220 @@
 @import "tailwindcss";
 
+/* ═══════════════════════════════════════════════════
+   DHARMA-OSINT — Tactical Design System
+   Theme: #f4f4f5 / #16a34a (Night Vision / CRT)
+   ═══════════════════════════════════════════════════ */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f4f4f5;
+  --foreground: #c0c0c0;
+  --neon: #16a34a;
+  --neon-dim: #00CC33;
+  --neon-dark: #008F11;
+  --neon-glow: rgba(0, 255, 65, 0.15);
+  --neon-glow-strong: rgba(0, 255, 65, 0.35);
+  --danger: #dc2626;
+  --warning: #ea580c;
+  --info: #0284c7;
+  --surface-0: #f4f4f5;
+  --surface-1: #ffffff;
+  --surface-2: #f4f4f5;
+  --surface-3: #e4e4e7;
+  --surface-4: #222222;
+  --border: #e4e4e7;
+  --border-glow: rgba(0, 255, 65, 0.2);
+  --text-primary: #e0e0e0;
+  --text-secondary: #52525b;
+  --text-muted: #555555;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-neon: var(--neon);
+  --color-neon-dim: var(--neon-dim);
+  --color-neon-dark: var(--neon-dark);
+  --color-danger: var(--danger);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-surface-0: var(--surface-0);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-surface-4: var(--surface-4);
+  --color-border: var(--border);
+  --color-border-glow: var(--border-glow);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-jetbrains);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* ── Base ─────────────────────────────────────────── */
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-inter), 'Inter', system-ui, sans-serif;
+}
+
+/* ── Scrollbar ────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--surface-1);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--neon-dark);
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--neon-dim);
+}
+
+/* ── CRT Scanline Overlay ─────────────────────────── */
+
+.crt-overlay {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.08) 2px,
+    rgba(0, 0, 0, 0.08) 4px
+  );
+  mix-blend-mode: multiply;
+}
+
+/* ── Glow Effects ─────────────────────────────────── */
+
+.glow-text {
+  text-shadow: 0 0 7px var(--neon), 0 0 20px var(--neon-glow);
+}
+
+
+
+.glow-border {
+  box-shadow: 0 0 0 1px var(--border), 0 0 8px var(--neon-glow), inset 0 0 8px rgba(0, 255, 65, 0.03);
+}
+
+.glow-border-strong {
+  box-shadow: 0 0 0 1px var(--neon-dark), 0 0 15px var(--neon-glow-strong), inset 0 0 15px rgba(0, 255, 65, 0.05);
+}
+
+/* ── Animations ───────────────────────────────────── */
+
+@keyframes pulse-neon {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+@keyframes scanline-flicker {
+  0% { opacity: 0.9; }
+  5% { opacity: 0.85; }
+  10% { opacity: 0.92; }
+  15% { opacity: 0.88; }
+  20% { opacity: 0.95; }
+  100% { opacity: 0.9; }
+}
+
+@keyframes ticker-scroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes signal-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(0, 255, 65, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(0, 255, 65, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(0, 255, 65, 0);
+  }
+}
+
+@keyframes live-dot {
+  0%, 100% {
+    background: var(--danger);
+    box-shadow: 0 0 0 0 rgba(255, 49, 49, 0.6);
+  }
+  50% {
+    background: var(--danger);
+    box-shadow: 0 0 0 4px rgba(255, 49, 49, 0);
+  }
+}
+
+.animate-pulse { animation: pulse-neon 2s ease-in-out infinite; }
+.animate-scanline { animation: scanline-flicker 4s ease-in-out infinite; }
+.animate-ticker { animation: ticker-scroll 60s linear infinite; }
+.animate-blink { animation: blink 1s step-end infinite; }
+.animate-fade-in-up { animation: fade-in-up 0.3s ease-out; }
+.animate-signal-pulse { animation: signal-pulse 2s infinite; }
+.animate-live-dot { animation: live-dot 1.5s ease-in-out infinite; }
+
+/* ── Tactical Components ──────────────────────────── */
+
+.tactical-panel {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+
+.severity-1 { border-left: 3px solid var(--text-muted); }
+.severity-2 { border-left: 3px solid var(--info); }
+.severity-3 { border-left: 3px solid var(--neon); }
+.severity-4 { border-left: 3px solid var(--warning); }
+.severity-5 { border-left: 3px solid var(--danger); }
+
+/* ── Cesium Overrides ─────────────────────────────── */
+
+.cesium-viewer {
+  font-family: var(--font-jetbrains), 'JetBrains Mono', monospace !important;
+}
+
+.cesium-viewer .cesium-widget-credits,
+.cesium-viewer .cesium-viewer-toolbar,
+.cesium-viewer .cesium-viewer-animationContainer,
+.cesium-viewer .cesium-viewer-timelineContainer,
+.cesium-viewer .cesium-viewer-fullscreenContainer,
+.cesium-viewer .cesium-viewer-bottom {
+  display: none !important;
 }

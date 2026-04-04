@@ -1,36 +1,35 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Project Dharma-OSINT 👁‍🗨
+
+A real-time, high-density Situational Awareness Dashboard for the **2026 Indian State Elections** (Kerala, West Bengal, Assam, Tamil Nadu).
+
+*Vibe Coding Aesthetic: Night-Vision Green, CRT Scanlines, High-Density Information Panels.*
+
+## Tech Stack
+*   **Frontend**: Next.js 16 (App Router), Tailwind CSS v4 (@theme inline)
+*   **Visual Engine**: CesiumJS (WebGL 3D Tactical Globe) + Custom GLSL Post-Processing
+*   **Database (Phase 2)**: Supabase (PostgreSQL + Real-time)
+*   **State & Stream (Phase 2)**: Upstash Redis (News tickers)
+*   **Intelligence (Phase 2)**: Pinecone (Vector Search)
+*   **Auth (Phase 2)**: Clerk
+
+## Features
+*   **Signal Convergence Pane**: Scrolling news ticker, AI-generated daily briefings, and severity-filtered intelligence signals geo-pinned to the globe.
+*   **3D Tactical Map**: CesiumJS powered globe styled with custom Night-Vision green and CRT scanline post-process shaders for a "war room" feel.
+*   **Intelligence Deep-Dives**: Detailed constituency views comparing candidate wealth, criminal records, and incumbency status using procedural mock data representing all 824 seats.
 
 ## Getting Started
 
-First, run the development server:
+1.  Clone the repository and install dependencies:
+    \`\`\`bash
+    npm install
+    \`\`\`
+2.  Provide a Cesium Ion access token in `.env.local` for full map imagery:
+    \`\`\`env
+    NEXT_PUBLIC_CESIUM_ION_TOKEN=your_token_here
+    \`\`\`
+3.  Start the development server:
+    \`\`\`bash
+    npm run dev
+    \`\`\`
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+*(Note: Initial build relies completely on high-quality procedural mock data. Supabase, Redis, and Pinecone are stubbed for Phase 2 implementation.)*
