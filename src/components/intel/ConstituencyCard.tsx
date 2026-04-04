@@ -1,8 +1,7 @@
 "use client";
 
 import { useState } from "react";
-
-import { MapPin, Users, AlertTriangle, TrendingUp, GraduationCap, Scale } from "lucide-react";
+import { MapPin, Users, AlertTriangle, TrendingUp, Scale, Fingerprint, Shield } from "lucide-react";
 import { formatIndianCurrency, volatilityColor } from "@/lib/utils/formatting";
 import CandidateRow from "./CandidateRow";
 import VolatilityGauge from "./VolatilityGauge";
@@ -15,7 +14,7 @@ interface ConstituencyCardProps {
 
 export default function ConstituencyCard({ constituency }: ConstituencyCardProps) {
   const { candidates: allCandidates } = useLiveData();
-  
+
   const candidates = allCandidates.filter(c => c.constituency_id === constituency.id);
   const totalWealth = candidates.reduce((sum, c) => sum + (c.assets_value || 0), 0);
   const totalCriminal = candidates.filter((c) => c.criminal_cases && c.criminal_cases > 0).length;
@@ -25,16 +24,26 @@ export default function ConstituencyCard({ constituency }: ConstituencyCardProps
     <div className="flex flex-col gap-0">
       {/* Header */}
       <div className="px-3 py-3 border-b border-[#e4e4e7]">
-        <h2 className="font-mono text-sm font-bold text-[#16a34a]  mb-1">
-          {constituency.name}
-        </h2>
-        <div className="flex items-center gap-3 font-mono text-[10px] text-[#71717a]">
-          <span className="flex items-center gap-1">
-            <MapPin className="h-3 w-3" />
-            {constituency.state} • #{constituency.id?.split("-")[1] || "0"}
+        <div className="flex justify-between items-start mb-1">
+          <h2 className="font-mono text-sm font-bold text-[#16a34a]">
+            {constituency.name}
+          </h2>
+          <span className={`font-mono text-[9px] font-bold px-1.5 py-0.5 rounded ${constituency.reservation !== 'GEN' ? 'bg-[#0284c7]/10 text-[#0284c7] border border-[#0284c7]/30' : 'bg-[#e4e4e7] text-[#71717a]'}`}>
+            {constituency.reservation || 'GEN'}
           </span>
-          <span>Phase {constituency.phase}</span>
-          <span>{constituency.pollingDate}</span>
+        </div>
+
+        <div className="flex flex-col gap-1 mt-1 font-mono text-[10px] text-[#71717a]">
+          <span className="flex items-center gap-1 text-[#52525b]">
+            <MapPin className="h-3 w-3 text-[#ea580c]" />
+            {constituency.district}, {constituency.state} • #{constituency.id?.split("-")[1] || "0"}
+          </span>
+          <span className="flex items-center gap-1">
+            <Shield className="h-3 w-3" /> Phase {constituency.phase} ({constituency.pollingDate})
+          </span>
+          <span className="flex items-center gap-1">
+            <Fingerprint className="h-3 w-3" /> Electorate (2021): {constituency.electorate ? constituency.electorate.toLocaleString('en-IN') : 'N/A'}
+          </span>
         </div>
       </div>
 
@@ -79,7 +88,7 @@ export default function ConstituencyCard({ constituency }: ConstituencyCardProps
       <div className="px-3 py-1.5 border-b border-[#e4e4e7] flex items-center gap-2">
         <TrendingUp className="h-3 w-3 text-[#71717a]" />
         <span className="font-mono text-[9px] text-[#71717a]">
-          GPS: {constituency.latitude}°N, {constituency.longitude}°E
+          GPS: {constituency.latitude?.toFixed(4)}°N, {constituency.longitude?.toFixed(4)}°E
         </span>
       </div>
 
@@ -90,21 +99,27 @@ export default function ConstituencyCard({ constituency }: ConstituencyCardProps
         </span>
       </div>
       <div className="flex flex-col">
-        {candidates
-          .sort((a, b) => (b.assets_value || 0) - (a.assets_value || 0))
-          .map((candidate) => (
-            <CandidateRow 
-              key={candidate.id} 
-              candidate={candidate} 
-              onClick={() => setActiveCandidate(candidate)}
-            />
-          ))}
+        {candidates.length > 0 ? (
+          candidates
+            .sort((a, b) => (b.assets_value || 0) - (a.assets_value || 0))
+            .map((candidate) => (
+              <CandidateRow
+                key={candidate.id}
+                candidate={candidate}
+                onClick={() => setActiveCandidate(candidate)}
+              />
+            ))
+        ) : (
+          <div className="p-6 text-center font-mono text-[10px] text-[#a1a1aa]">
+            Awaiting Candidate Affidavits.
+          </div>
+        )}
       </div>
 
       {activeCandidate && (
-        <CandidateModal 
-          candidate={activeCandidate} 
-          onClose={() => setActiveCandidate(null)} 
+        <CandidateModal
+          candidate={activeCandidate}
+          onClose={() => setActiveCandidate(null)}
         />
       )}
     </div>
