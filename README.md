@@ -1,35 +1,65 @@
-# Project Dharma-OSINT 👁‍🗨
+🇮🇳 Project Dharma-OSINT
+Real-Time Situational Awareness for the 2026 Indian State Elections
+Project Dharma is a lightweight, high-performance OSINT (Open-Source Intelligence) dashboard designed to fuse real-time election data, candidate dossiers, and live "signal" updates into a unified tactical interface. Inspired by military situational awareness tools and the work of Bilawal Sidhu, this platform provides a "Command Center" view of the 2026 assembly elections in Kerala, Assam, West Bengal, and Tamil Nadu.
 
-A real-time, high-density Situational Awareness Dashboard for the **2026 Indian State Elections** (Kerala, West Bengal, Assam, Tamil Nadu).
+🛰️ Intelligence Architecture
+The system operates on a multi-layered Data Fusion model:
 
-*Vibe Coding Aesthetic: Night-Vision Green, CRT Scanlines, High-Density Information Panels.*
+The Signal Layer: Autonomous Python workers (osint_workers/) monitor news feeds and social media. They use Gemini AI to categorize sentiment and extract geographic entities.
 
-## Tech Stack
-*   **Frontend**: Next.js 16 (App Router), Tailwind CSS v4 (@theme inline)
-*   **Visual Engine**: CesiumJS (WebGL 3D Tactical Globe) + Custom GLSL Post-Processing
-*   **Database (Phase 2)**: Supabase (PostgreSQL + Real-time)
-*   **State & Stream (Phase 2)**: Upstash Redis (News tickers)
-*   **Intelligence (Phase 2)**: Pinecone (Vector Search)
-*   **Auth (Phase 2)**: Clerk
+The Dossier Layer: Real-time scrapers pull verified candidate data from ECI and MyNeta, generating instant "Dossier Files" containing wealth, education, and criminal records.
 
-## Features
-*   **Signal Convergence Pane**: Scrolling news ticker, AI-generated daily briefings, and severity-filtered intelligence signals geo-pinned to the globe.
-*   **3D Tactical Map**: CesiumJS powered globe styled with custom Night-Vision green and CRT scanline post-process shaders for a "war room" feel.
-*   **Intelligence Deep-Dives**: Detailed constituency views comparing candidate wealth, criminal records, and incumbency status using procedural mock data representing all 824 seats.
+The Tactical Layer: A responsive Leaflet map renders constituency boundaries (GeoJSON) and overlays live pulse-markers for incidents, rallies, and polling trends.
 
-## Getting Started
+🛠️ Tech Stack
+Frontend: Next.js 15+ (App Router), Tailwind CSS.
 
-1.  Clone the repository and install dependencies:
-    \`\`\`bash
-    npm install
-    \`\`\`
-2.  Provide a Cesium Ion access token in `.env.local` for full map imagery:
-    \`\`\`env
-    NEXT_PUBLIC_CESIUM_ION_TOKEN=your_token_here
-    \`\`\`
-3.  Start the development server:
-    \`\`\`bash
-    npm run dev
-    \`\`\`
+Map Engine: Leaflet.js with custom tactical dark-mode styling.
 
-*(Note: Initial build relies completely on high-quality procedural mock data. Supabase, Redis, and Pinecone are stubbed for Phase 2 implementation.)*
+Backend: Supabase (PostgreSQL + Real-time WebSocket Listeners).
+
+Authentication: Clerk (Social & Dossier-access control).
+
+Intelligence Workers: Python 3.11 (BeautifulSoup, Playwright).
+
+AI Core: Gemini 1.5 Pro (via Google AI Studio).
+
+🚀 Rapid Implementation
+1. Initialize the Intelligence Hub (Supabase)
+Execute the SQL migrations found in src/lib/supabase/schema.sql to set up your tables:
+
+constituencies: Geographic boundaries and status.
+
+candidates: Deep-dive dossiers.
+
+signals: Real-time news and incident alerts.
+
+2. Configure Environment
+Create a .env.local in the root directory:
+
+Code snippet
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_key
+GEMINI_API_KEY=your_google_ai_studio_key
+3. Deploy the Tactical Frontend
+Bash
+npm install
+npm run dev
+4. Ignite the OSINT Workers
+Bash
+cd osint_workers
+pip install -r requirements.txt
+python signal_ingestor.py
+📡 Roadmap
+[x] Leaflet Integration: High-performance constituency boundary rendering.
+
+[x] Dossier System: Interactive candidate modals with ECI/MyNeta source links.
+
+[x] Live Ticker: Real-time signal feed with automatic map focus.
+
+[ ] Swing Engine: Logic for calculating victory margins on Counting Day (May 4, 2026).
+
+[ ] Protest Tracking: Correlating signal density with physical geography to predict volatility hotspots.
+
+💡 Origin & Inspiration
+This project was built during a 72-hour "Vibe Coding" sprint, utilizing Google Antigravity and Gemini Pro to orchestrate complex data flows between government affidavits and geospatial visualizations. It serves as a proof-of-concept for how bedroom-startup stacks can rival institutional intelligence tools like Palantir.
