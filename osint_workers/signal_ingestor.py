@@ -4,8 +4,8 @@ from bs4 import BeautifulSoup
 import feedparser
 import json
 import os
-import urllib.parse
 from google import genai
+from googleapiclient.discovery import build
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
@@ -15,15 +15,15 @@ load_dotenv(dotenv_path=env_path)
 SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL")
 SUPABASE_KEY = os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY") # Add this to your .env
 
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY) if YOUTUBE_API_KEY else None
 
 try:
-    if not SUPABASE_URL or not SUPABASE_KEY or not SUPABASE_KEY.startswith("ey"):
-        raise ValueError("Supabase credentials missing or invalid in .env file.")
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 except Exception as e:
-    print(f"Warning: Could not connect to Supabase: {e}")
+    print(f"CRITICAL: Supabase offline: {e}")
     supabase = None
 
 FEEDS = {
@@ -31,8 +31,7 @@ FEEDS = {
     "Assam": "https://news.google.com/rss/search?q=Assam+Election+2026+when:1d&hl=en-IN&gl=IN&ceid=IN:en",
     "Tamil_Nadu": "https://news.google.com/rss/search?q=Tamil+Nadu+Election+2026+when:1d&hl=en-IN&gl=IN&ceid=IN:en",
     "West_Bengal": "https://news.google.com/rss/search?q=West+Bengal+Election+2026+when:1d&hl=en-IN&gl=IN&ceid=IN:en",
-    "Govt_Official": "https://news.google.com/rss/search?q=Election+Commission+OR+PIB+India+official+release+when:1d&hl=en-IN&gl=IN&ceid=IN:en",
-    "Political_Parties": "https://news.google.com/rss/search?q=(site:bjp.org+OR+site:inc.in+OR+site:cpim.org)+election+when:1d&hl=en-IN&gl=IN&ceid=IN:en"
+    "Govt_Official": "https://news.google.com/rss/search?q=Election+Commission+OR+PIB+India+official+release+when:1d&hl=en-IN&gl=IN&ceid=IN:en"
 }
 
 def extract_article_data(url, fallback_html):
@@ -41,8 +40,7 @@ def extract_article_data(url, fallback_html):
         headers = {'User-Agent': 'Mozilla/5.0'}
         res = requests.get(url, headers=headers, timeout=10, allow_redirects=True)
         soup = BeautifulSoup(res.content, 'html.parser')
-        paragraphs = soup.find_all('p')
-        full_text = " ".join([p.text for p in paragraphs])
+        full_text = " ".join([p.text for p in soup.find_all('p')])
         og_image = soup.find('meta', property='og:image')
         if og_image: image_url = og_image.get('content', '')
     except Exception: pass
@@ -50,10 +48,22 @@ def extract_article_data(url, fallback_html):
         full_text = BeautifulSoup(fallback_html, 'html.parser').get_text(separator=' ')
     return full_text[:3000], image_url
 
+def fetch_youtube_video(query):
+    """Hits the YouTube API to find the top video/short for the query."""
+    if not youtube: return ""
+    try:
+        req = youtube.search().list(q=query, part='snippet', type='video', maxResults=1, order='relevance')
+        res = req.execute()
+        if 'items' in res and len(res['items']) > 0:
+            video_id = res['items'][0]['id']['videoId']
+            return f"https://www.youtube.com/embed/{video_id}?autoplay=1"
+    except Exception as e:
+        print(f"      [!] YouTube API Error: {e}")
+    return ""
+
 def analyze_and_insert(source_title, source_url, original_title, full_text, image_url, state_context, valid_c_ids):
     prompt = f"""
     Analyze this election news article: Title: {original_title} Body: {full_text}
-    
     Return pure JSON (No markdown):
     {{
         "state": "{state_context.replace('_', ' ')}",
@@ -61,8 +71,7 @@ def analyze_and_insert(source_title, source_url, original_title, full_text, imag
         "severity": 1 to 5 integer,
         "verified": true or false,
         "bullets":["Bullet 1", "Bullet 2", "Bullet 3"],
-        "entities":["Name 1", "Party 1"],
-        "video_query": "If this is a physical event (rally, clash, speech), provide a 3-5 word YouTube search query for it. Else leave blank."
+        "video_query": "Generate a 3-word YouTube search query for this news event (e.g. 'Assam election rally'). MUST NOT BE BLANK."
     }}
     """
     try:
@@ -75,33 +84,29 @@ def analyze_and_insert(source_title, source_url, original_title, full_text, imag
         c_id = analysis.get("constituency_id")
         if c_id not in valid_c_ids: c_id = None
 
-        # THE FIX: Properly constructed YouTube Embed URL
+        # Fetch REAL YouTube Video
         video_url = ""
         vq = analysis.get("video_query", "")
         if vq and len(vq) > 3:
-            video_url = f"https://www.youtube.com/embed?listType=search&list={urllib.parse.quote(vq)}"
+            print(f"      -> Searching YouTube for: '{vq}'")
+            video_url = fetch_youtube_video(vq)
         
         if supabase:
             existing = supabase.table("signals").select("id").eq("title", original_title).execute()
             if len(existing.data) > 0: return
 
             supabase.table("signals").insert({
-                "source": source_title,
-                "source_url": source_url,
-                "image_url": image_url,
-                "video_url": video_url,  # <--- Now securely injecting the video!
-                "title": original_title,
-                "body": short_body,
-                "state": analysis.get("state"),
-                "constituency_id": c_id,
-                "severity": analysis.get("severity", 1),
-                "verified": analysis.get("verified", False),
+                "source": source_title, "source_url": source_url, "image_url": image_url, "video_url": video_url,
+                "title": original_title, "body": short_body, "state": analysis.get("state"),
+                "constituency_id": c_id, "severity": analysis.get("severity", 1),
+                "verified": analysis.get("verified", False) or (state_context == "Govt_Official"),
                 "full_summary": analysis.get("bullets",[]),
-                "entities_involved": analysis.get("entities",[]),
-                "category": "alert" if analysis.get("severity", 1) >= 3 else "official"
+                "category": "official" if state_context == "Govt_Official" else "alert"
             }).execute()
             print(f"   ->[SUCCESS] Saved | SEV-{analysis.get('severity')}")
     except Exception as e: print(f"   ->[LLM/DB Error]: {e}")
+
+
 
 def generate_ai_briefing():
     print("\n[+] Compiling Dynamic AI Briefing...")

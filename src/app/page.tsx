@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import dynamic from "next/dynamic";
+import { Radio, Map as MapIcon, Database } from "lucide-react";
 import TopBar from "@/components/TopBar";
 import BottomBar from "@/components/BottomBar";
 import SignalPane from "@/components/signals/SignalPane";
 import IntelPane from "@/components/intel/IntelPane";
 import MapControls from "@/components/map/MapControls";
-import SignalModal from "@/components/signals/SignalModal"; // NEW: Import the modal here
+import SignalModal from "@/components/signals/SignalModal";
 
 const IndiaMap = dynamic(() => import("@/components/map/IndiaMap"), {
   ssr: false,
@@ -21,22 +22,27 @@ const IndiaMap = dynamic(() => import("@/components/map/IndiaMap"), {
   ),
 });
 
-const TOPBAR_H = 36;
-const BOTTOMBAR_H = 28;
-const SIDEBAR_W = 280;
-
 export default function Home() {
   const [flyToState, setFlyToState] = useState<string | null>(null);
   const [globalStateFilter, setGlobalStateFilter] = useState<string>("ALL");
   const [globalConstituencyId, setGlobalConstituencyId] = useState<string | null>(null);
-
-  // NEW: Global state for the popup so the Map can open it!
   const [activeSignal, setActiveSignal] = useState<any | null>(null);
+
+  // NEW: Mobile View State
+  const [mobilePane, setMobilePane] = useState<"signals" | "map" | "intel">("map");
 
   const handleStateFilter = (s: string) => {
     setGlobalStateFilter(s);
     setGlobalConstituencyId(null);
     setFlyToState(s === "ALL" ? "India" : s);
+  };
+
+  const handleSelectConstituency = (id: string) => {
+    setGlobalConstituencyId(id);
+    // Auto-switch to Intel pane on mobile when a map dot is clicked
+    if (window.innerWidth < 768) {
+      setMobilePane("intel");
+    }
   };
 
   return (
@@ -45,23 +51,31 @@ export default function Home() {
         flyToState={flyToState}
         activeState={globalStateFilter}
         activeConstituencyId={globalConstituencyId}
-        onSelectConstituency={id => setGlobalConstituencyId(id)}
-        onSelectState={state => handleStateFilter(state)}
-        onSelectSignal={signal => setActiveSignal(signal)} // NEW: Pass click handler to map
+        onSelectConstituency={handleSelectConstituency}
+        onSelectState={handleStateFilter}
+        onSelectSignal={setActiveSignal}
       />
 
       <TopBar />
 
-      <aside style={{ position: "fixed", top: TOPBAR_H, left: 0, width: SIDEBAR_W, bottom: BOTTOMBAR_H, zIndex: 20, background: "rgba(255,255,255,0.92)", backdropFilter: "blur(8px)", borderRight: "1px solid #e4e4e7", overflowY: "auto" }}>
+      {/* LEFT SIDEBAR: SIGNAL PANE */}
+      <aside
+        className={`fixed top-[36px] bottom-[76px] md:bottom-[28px] left-0 w-full md:w-[280px] z-40 bg-white/95 backdrop-blur-md border-r border-[#e4e4e7] transition-transform duration-300 ease-in-out ${mobilePane === "signals" ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+          }`}
+      >
         <SignalPane
           globalStateFilter={globalStateFilter}
           setGlobalStateFilter={handleStateFilter}
           globalConstituencyId={globalConstituencyId}
-          onSelectSignal={setActiveSignal} // NEW: Pass to Left Pane
+          onSelectSignal={setActiveSignal}
         />
       </aside>
 
-      <aside style={{ position: "fixed", top: TOPBAR_H, right: 0, width: SIDEBAR_W, bottom: BOTTOMBAR_H, zIndex: 20, background: "rgba(255,255,255,0.92)", backdropFilter: "blur(8px)", borderLeft: "1px solid #e4e4e7", overflowY: "auto" }}>
+      {/* RIGHT SIDEBAR: INTEL PANE */}
+      <aside
+        className={`fixed top-[36px] bottom-[76px] md:bottom-[28px] right-0 w-full md:w-[280px] z-40 bg-white/95 backdrop-blur-md border-l border-[#e4e4e7] transition-transform duration-300 ease-in-out ${mobilePane === "intel" ? "translate-x-0" : "translate-x-full md:translate-x-0"
+          }`}
+      >
         <IntelPane
           globalStateFilter={globalStateFilter}
           setGlobalStateFilter={handleStateFilter}
@@ -70,10 +84,27 @@ export default function Home() {
         />
       </aside>
 
-      <MapControls onFlyToState={(s) => handleStateFilter(s === "India" ? "ALL" : s)} />
+      {/* MAP CONTROLS */}
+      <MapControls onFlyToState={(s) => {
+        handleStateFilter(s === "India" ? "ALL" : s);
+        if (window.innerWidth < 768) setMobilePane("map");
+      }} />
+
+      {/* NEW: MOBILE BOTTOM NAVIGATION (Hidden on Desktop) */}
+      <div className="md:hidden fixed bottom-[28px] left-0 right-0 h-[48px] bg-white border-t border-[#e4e4e7] z-50 flex shadow-[0_-4px_10px_rgba(0,0,0,0.05)]">
+        <button onClick={() => setMobilePane('signals')} className={`flex-1 flex flex-col items-center justify-center gap-1 font-mono text-[10px] tracking-wider transition-colors ${mobilePane === 'signals' ? 'text-[#16a34a] bg-[#16a34a]/10 border-t-2 border-[#16a34a]' : 'text-[#71717a] border-t-2 border-transparent'}`}>
+          <Radio className="h-4 w-4" /> SIGNALS
+        </button>
+        <button onClick={() => setMobilePane('map')} className={`flex-1 flex flex-col items-center justify-center gap-1 font-mono text-[10px] tracking-wider transition-colors ${mobilePane === 'map' ? 'text-[#0284c7] bg-[#0284c7]/10 border-t-2 border-[#0284c7]' : 'text-[#71717a] border-t-2 border-transparent'}`}>
+          <MapIcon className="h-4 w-4" /> TACTICAL MAP
+        </button>
+        <button onClick={() => setMobilePane('intel')} className={`flex-1 flex flex-col items-center justify-center gap-1 font-mono text-[10px] tracking-wider transition-colors ${mobilePane === 'intel' ? 'text-[#ea580c] bg-[#ea580c]/10 border-t-2 border-[#ea580c]' : 'text-[#71717a] border-t-2 border-transparent'}`}>
+          <Database className="h-4 w-4" /> INTEL PANE
+        </button>
+      </div>
+
       <BottomBar />
 
-      {/* NEW: Render the Popup here so it floats above everything */}
       {activeSignal && <SignalModal signal={activeSignal} onClose={() => setActiveSignal(null)} />}
     </>
   );

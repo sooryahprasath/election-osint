@@ -14,23 +14,19 @@ export default function BottomBar() {
           {isConnected ? (
             <>
               <Wifi className="h-3 w-3 text-[#16a34a]" />
-              <span className="text-[#16a34a]">SUPABASE CONNECTED</span>
+              <span className="text-[#16a34a]">SYS.ONLINE</span>
             </>
           ) : (
             <>
               <WifiOff className="h-3 w-3 text-[#ea580c]" />
-              <span className="text-[#ea580c]">OFFLINE / MOCK DATA</span>
+              <span className="text-[#ea580c]">OFFLINE</span>
             </>
           )}
         </div>
-        <div className="flex items-center gap-1">
-          <Database className="h-3 w-3 text-[#71717a]" />
-          <span className="text-[#71717a]">{isConnected ? "REALTIME" : "LOCAL CACHE"}</span>
-        </div>
       </div>
 
-      {/* Center: Counts */}
-      <div className="flex items-center gap-5">
+      {/* Center: Counts (HIDDEN ON MOBILE) */}
+      <div className="hidden md:flex items-center gap-5">
         <div className="flex items-center gap-1">
           <Signal className="h-3 w-3 text-[#ea580c]" />
           <span className="text-[#52525b]">
@@ -51,18 +47,12 @@ export default function BottomBar() {
             <span className="text-[#16a34a]">{candidates.length}</span>
           </span>
         </div>
-        <div className="flex items-center gap-1">
-          <Crosshair className="h-3 w-3 text-[#71717a]" />
-          <span className="text-[#52525b]">
-            STATES: <span className="text-[#27272a]">{new Set(constituencies.map((c: any) => c.state)).size}</span>
-          </span>
-        </div>
       </div>
 
       {/* Right: Attribution */}
       <div className="flex items-center gap-2 text-[#71717a]">
-        <span>SRC: ECI / ADR / MyNeta</span>
-        <span className="text-[#e4e4e7]">|</span>
+        <span className="hidden md:inline">SRC: ECI / ADR / MyNeta</span>
+        <span className="hidden md:inline text-[#e4e4e7]">|</span>
         <span>v0.1.0-alpha</span>
       </div>
     </footer>
