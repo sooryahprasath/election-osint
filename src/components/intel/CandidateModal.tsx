@@ -6,6 +6,7 @@ import { X, User, IndianRupee, AlertTriangle, GraduationCap, MapPin, Search, Ext
 import { formatIndianCurrency } from "@/lib/utils/formatting";
 import { useLiveData } from "@/lib/context/LiveDataContext";
 
+// FIX: Added template literal backticks so the color generates correctly without crashing!
 const getPartyColor = (party: string) => {
   const hash = party.split('').reduce((acc, char) => char.charCodeAt(0) + ((acc << 5) - acc), 0);
   return `hsl(${hash % 360}, 70%, 50%)`;
@@ -30,7 +31,7 @@ export default function CandidateModal({ candidate, onClose }: { candidate: any;
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-fade-in-up">
       <div className="bg-[#ffffff] border border-[#e4e4e7] rounded-lg shadow-xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[95vh]">
 
-        {/* Header */}
+        {/* Header - Reverted to clean OSINT grey */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-[#e4e4e7] shrink-0 bg-[#f4f4f5]">
           <div className="flex items-center gap-2">
             <Search className="h-4 w-4 text-[#71717a]" />
@@ -62,15 +63,29 @@ export default function CandidateModal({ candidate, onClose }: { candidate: any;
               <div className="absolute inset-0 bg-[linear-gradient(rgba(0,0,0,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,0.03)_1px,transparent_1px)] bg-[size:10px_10px] pointer-events-none" />
             </div>
 
-            {/* Verify Button */}
-            <a
-              href={candidate.source_url || "#"}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full bg-[#16a34a]/10 text-[#16a34a] border border-[#16a34a]/30 font-mono text-[10px] font-bold px-3 py-2 rounded flex items-center justify-center gap-2 hover:bg-[#16a34a] hover:text-white transition-colors"
-            >
-              <ExternalLink className="h-3 w-3" /> OFFICIAL ECI AFFIDAVIT
-            </a>
+            {/* Verify Buttons directly under the photo */}
+            <div className="flex flex-col gap-2 w-full">
+              <a
+                href={candidate.source_url || "#"}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full bg-[#16a34a]/10 text-[#16a34a] border border-[#16a34a]/30 font-mono text-[10px] font-bold px-3 py-2 rounded flex items-center justify-center gap-2 hover:bg-[#16a34a] hover:text-white transition-colors"
+              >
+                <ExternalLink className="h-3 w-3" /> OFFICIAL ECI AFFIDAVIT
+              </a>
+
+              {/* Only show MyNeta button if the link exists in the database */}
+              {candidate.myneta_url && (
+                <a
+                  href={candidate.myneta_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full bg-[#0284c7]/10 text-[#0284c7] border border-[#0284c7]/30 font-mono text-[10px] font-bold px-3 py-2 rounded flex items-center justify-center gap-2 hover:bg-[#0284c7] hover:text-white transition-colors"
+                >
+                  <ExternalLink className="h-3 w-3" /> ADR MYNETA PROFILE
+                </a>
+              )}
+            </div>
           </div>
 
           {/* Right Column: Key Details */}

@@ -27,7 +27,7 @@ except Exception as e:
     supabase = None
 
 FEEDS = {
-    "ANI_News": "https://aninews.in/rss-feed/"
+    "ANI_News": "https://aninews.in/rss-feed/",
     "Kerala": "https://news.google.com/rss/search?q=Kerala+Election+2026+when:1d&hl=en-IN&gl=IN&ceid=IN:en",
     "Assam": "https://news.google.com/rss/search?q=Assam+Election+2026+when:1d&hl=en-IN&gl=IN&ceid=IN:en",
     "Tamil_Nadu": "https://news.google.com/rss/search?q=Tamil+Nadu+Election+2026+when:1d&hl=en-IN&gl=IN&ceid=IN:en",

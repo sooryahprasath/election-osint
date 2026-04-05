@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useLiveData } from "@/lib/context/LiveDataContext";
@@ -11,10 +11,12 @@ const INDIA_ZOOM = 5;
 const MIN_ZOOM = 4.5;
 const MAX_ZOOM = 12;
 
+// FIX: Expanded Eastern bounds to 100.0 to fully reveal Assam without hitting the invisible wall
+const MAX_BOUNDS: L.LatLngBoundsExpression = [[6.0, 68.0], [37.0, 100.0]];
+
 const ELECTION_STATES = ["Kerala", "Assam", "Puducherry", "Tamil Nadu", "West Bengal"];
 const NORMALIZED_TARGETS = ELECTION_STATES.map(s => s.toLowerCase().replace(/\s+/g, ''));
 
-// NEW: Smart Fallback Coordinates for Videos
 const FALLBACK_COORDS: Record<string, [number, number]> = {
   "Kerala": [8.5241, 76.9366],       // Thiruvananthapuram
   "Assam": [26.1445, 91.7362],       // Dispur / Guwahati
@@ -48,9 +50,14 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
   const mapRef = useRef<L.Map | null>(null);
   const markersGroupRef = useRef<L.LayerGroup | null>(null);
   const statesLayerRef = useRef<L.GeoJSON | null>(null);
-  const tileLayerRef = useRef<L.TileLayer | null>(null);
 
+  // Read the Operation Mode from ENV for Counting Day overrides
+  const OPERATION_MODE = process.env.NEXT_PUBLIC_OPERATION_MODE || "PRE-POLL";
+  const isCountingDay = OPERATION_MODE === "COUNTING_DAY";
+
+  // ==========================================
   // 1. INITIALIZE MAP & BORDERS
+  // ==========================================
   useEffect(() => {
     if (!divRef.current || mapRef.current) return;
 
@@ -58,8 +65,8 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
       zoomControl: false,
       attributionControl: false,
       renderer: L.canvas({ padding: 0.5 }),
-      maxBounds: [[6.0, 68.0], [37.0, 98.0]] as L.LatLngBoundsExpression,
-      maxBoundsViscosity: 1.0,
+      maxBounds: MAX_BOUNDS,
+      maxBoundsViscosity: 0.8, // FIX: Butter smooth panning at borders
       minZoom: MIN_ZOOM,
       maxZoom: MAX_ZOOM,
     }).setView(INDIA_CENTER, INDIA_ZOOM);
@@ -73,20 +80,13 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
     map.createPane('interactiveStates');
     map.getPane('interactiveStates')!.style.zIndex = '400';
 
-    // Dark Mode Tile Support
-    const isDark = document.documentElement.classList.contains('dark');
-    const tileUrl = isDark ? "https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png" : "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png";
+    // FIX: Synchronous Layer Group Initialization! This guarantees dots draw on the first load!
+    markersGroupRef.current = L.layerGroup().addTo(map);
 
-    tileLayerRef.current = L.tileLayer(tileUrl, { subdomains: "abcd", noWrap: true, maxZoom: 19 }).addTo(map);
-
-    // Listen for Theme Toggle
-    const handleThemeChange = () => {
-      if (tileLayerRef.current) {
-        const dark = document.documentElement.classList.contains('dark');
-        tileLayerRef.current.setUrl(dark ? "https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png" : "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png");
-      }
-    };
-    window.addEventListener('theme-changed', handleThemeChange);
+    L.tileLayer(
+      "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png",
+      { subdomains: "abcd", noWrap: true, maxZoom: 19 }
+    ).addTo(map);
 
     const loadMapData = async () => {
       try {
@@ -139,21 +139,20 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
           }).addTo(mapRef.current);
         }
       } catch (e) { }
-
-      if (mapRef.current) markersGroupRef.current = L.layerGroup().addTo(mapRef.current);
     };
 
     loadMapData();
 
     return () => {
-      window.removeEventListener('theme-changed', handleThemeChange);
       map.remove();
       mapRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // DYNAMIC MAP STYLING
+  // ==========================================
+  // 2. DYNAMIC STATE STYLING (Greying Out)
+  // ==========================================
   useEffect(() => {
     if (!statesLayerRef.current) return;
 
@@ -186,18 +185,28 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
     });
   }, [activeState]);
 
-  // RENDER MARKERS & HOTSPOTS
+  // ==========================================
+  // 3. RENDER MARKERS, VIDEOS & HOTSPOTS
+  // ==========================================
   useEffect(() => {
     if (!mapRef.current || !markersGroupRef.current) return;
     markersGroupRef.current.clearLayers();
 
+    // --- CONSTITUENCY DOTS ---
     constituencies.forEach((c: any) => {
       if (activeState !== "ALL" && c.state !== activeState) return;
 
       const metaColor = STATE_META[c.state]?.color || "#16a34a";
       let color = metaColor;
-      if (c.volatility_score >= 70) color = "#dc2626";
-      else if (c.volatility_score >= 40) color = "#ea580c";
+
+      // Counting Day Override Logic
+      if (isCountingDay && c.leading_party) {
+        // Future: Parse leading party color here
+        color = "#3b82f6"; // Placeholder for party colors
+      } else {
+        if (c.volatility_score >= 70) color = "#dc2626";
+        else if (c.volatility_score >= 40) color = "#ea580c";
+      }
 
       const isSelected = c.id === activeConstituencyId;
       if (activeConstituencyId && !isSelected) return;
@@ -215,6 +224,7 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
       m.addTo(markersGroupRef.current!);
     });
 
+    // --- SIGNAL VIDEOS & RADARS ---
     signals.forEach((s: any, index: number) => {
       if (activeState !== "ALL" && s.state !== activeState && s.state) return;
 
@@ -222,45 +232,52 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
       let lng = s.longitude;
       let isFallback = false;
 
-      // Coordinate Fallback Logic
+      // Map to constituency if coords missing
       if (!lat && s.constituency_id) {
         const c = constituencies.find((x: any) => x.id === s.constituency_id);
         if (c) { lat = c.latitude; lng = c.longitude; }
       }
 
+      // Map to State Capital if constituency unknown
       if (!lat) {
         isFallback = true;
-        if (s.state && FALLBACK_COORDS[s.state]) {
-          lat = FALLBACK_COORDS[s.state][0];
-          lng = FALLBACK_COORDS[s.state][1];
-        } else if (s.category === 'official' || !s.state) {
+        if (s.state) {
+          const stateConsts = constituencies.filter((c: any) => c.state === s.state);
+          if (stateConsts.length > 0) {
+            // Pseudo-random pick
+            const targetC = stateConsts[(index * 7) % stateConsts.length];
+            lat = targetC.latitude;
+            lng = targetC.longitude;
+          } else {
+            lat = FALLBACK_COORDS[s.state]?.[0];
+            lng = FALLBACK_COORDS[s.state]?.[1];
+          }
+        } else {
           lat = FALLBACK_COORDS["National"][0];
           lng = FALLBACK_COORDS["National"][1];
         }
       }
 
       if (lat && lng) {
-        // JITTER ALGORITHM: If this is a fallback coordinate, scatter it so videos don't stack perfectly on top of each other
+        // Micro-jitter so markers don't perfectly overlap the green constituency dot
         if (isFallback) {
-          // We use the index to mathematically spread them in a circle around the capital
-          const angle = index * (Math.PI / 4);
-          const distance = 0.5 + (index % 3) * 0.3; // between 0.5 and 1.1 degrees away
-          lat += Math.cos(angle) * distance;
-          lng += Math.sin(angle) * distance;
+          lat += (Math.random() - 0.5) * 0.05;
+          lng += (Math.random() - 0.5) * 0.05;
         }
 
-        // Clean UI Border Colors
-        let borderColor = "#3b82f6"; // Default Blue
-        if (s.severity >= 4 || s.category === 'breaking') borderColor = "#dc2626";
-        else if (s.severity === 3 || s.category === 'alert') borderColor = "#ea580c";
-        else if (s.category === 'official') borderColor = "#16a34a";
+        let borderColor = "#3b82f6"; // Blue
+        if (s.severity >= 4 || s.category === 'breaking') borderColor = "#dc2626"; // Red
+        else if (s.severity === 3 || s.category === 'alert') borderColor = "#ea580c"; // Orange
+        else if (s.category === 'official') borderColor = "#16a34a"; // Green
 
         if (s.video_url) {
           const videoIdMatch = s.video_url.match(/embed\/([^?]+)/);
           const videoId = videoIdMatch ? videoIdMatch[1] : null;
+
+          // FIX: Corrected the YouTube URL string
           const thumbnailUrl = videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : "";
 
-          // CLEAN WHITE THEME VIDEO BOX
+          // FIX: Removed `hover:scale-110` and `transition-transform` to stop the jump bug!
           const videoIcon = L.divIcon({
             className: "bg-transparent cursor-pointer",
             html: `
@@ -277,7 +294,6 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
           sm.addTo(markersGroupRef.current!);
         }
         else if (s.severity >= 3 || s.category === 'official') {
-          // Normal Radar Blip
           const radarIcon = L.divIcon({
             className: "bg-transparent cursor-pointer",
             html: `<div style="position: relative; width: 24px; height: 24px; transform: translate(-50%, -50%);"><div style="position: absolute; inset: 0; border-radius: 50%; background: ${borderColor}99; animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;"></div><div style="position: absolute; top: 50%; left: 50%; width: 8px; height: 8px; border-radius: 50%; background: ${borderColor}; transform: translate(-50%, -50%); box-shadow: 0 0 4px rgba(0,0,0,0.3); border: 1px solid #ffffff;"></div></div>`,
@@ -291,9 +307,11 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
       }
     });
 
-  }, [constituencies, signals, activeState, activeConstituencyId, onSelectConstituency, onSelectSignal]);
+  }, [constituencies, signals, activeState, activeConstituencyId, onSelectConstituency, onSelectSignal, isCountingDay]);
 
-  // 3. CAMERA CONTROLS
+  // ==========================================
+  // 4. CAMERA CONTROLS
+  // ==========================================
   useEffect(() => {
     if (!mapRef.current || !flyToState) return;
     const v = STATE_VIEWS[flyToState];
