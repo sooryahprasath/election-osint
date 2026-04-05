@@ -10,11 +10,11 @@ export default function BottomBar() {
   const [showDevMenu, setShowDevMenu] = useState(false);
 
   // Check ENV to see if we should show the secret menu (Defaults to false if not set)
-  const ENABLE_DEV_MENU = process.env.NEXT_PUBLIC_ENABLE_DEV_MENU === "true";
+  const ENABLE_DEV_MENU = process.env.NEXT_PUBLIC_ENABLE_DEV_MENU !== "false";
 
   const handleReset = () => {
     setSimulatedDate(null);
-    setOperationMode(process.env.NEXT_PUBLIC_OPERATION_MODE || "PRE-POLL");
+    setOperationMode("PRE-POLL");
   };
 
   return (
@@ -42,7 +42,6 @@ export default function BottomBar() {
           <span className="hidden md:inline">SRC: ECI / ADR / MyNeta</span>
           <span className="hidden md:inline text-[#e4e4e7]">|</span>
 
-          {/* ONLY SHOW IF ENABLED IN ENV */}
           {ENABLE_DEV_MENU ? (
             <button onClick={() => setShowDevMenu(!showDevMenu)} className="hover:text-[#16a34a] transition-colors flex items-center gap-1">
               v0.1.0-alpha <Settings2 className="h-3 w-3" />
@@ -62,17 +61,11 @@ export default function BottomBar() {
 
           <span className="font-mono text-[8px] text-[#71717a] mb-1 block">TIME MACHINE:</span>
           <div className="flex flex-col gap-1 font-mono text-[9px] mb-3">
-            <button onClick={handleReset} className="text-left py-1 px-2 hover:bg-[#f4f4f5] rounded text-[#52525b] font-bold">RESET TO REAL TIME</button>
-            <button onClick={() => setSimulatedDate(ELECTION_DATES.phase1)} className="text-left py-1 px-2 hover:bg-[#f4f4f5] rounded text-[#0284c7]">WARP &rarr; PHASE 1 (APR 9)</button>
-            <button onClick={() => setSimulatedDate(ELECTION_DATES.phase2)} className="text-left py-1 px-2 hover:bg-[#f4f4f5] rounded text-[#0284c7]">WARP &rarr; PHASE 2 (APR 23)</button>
-            <button onClick={() => setSimulatedDate(ELECTION_DATES.counting)} className="text-left py-1 px-2 hover:bg-[#f4f4f5] rounded text-[#ea580c]">WARP &rarr; COUNTING DAY (MAY 4)</button>
-          </div>
-
-          <span className="font-mono text-[8px] text-[#71717a] mb-1 block">OPERATION MODE:</span>
-          <div className="flex flex-col gap-1 font-mono text-[9px]">
-            <button onClick={() => setOperationMode("PRE-POLL")} className={`text-left py-1 px-2 rounded ${operationMode === 'PRE-POLL' ? 'bg-[#16a34a] text-white' : 'hover:bg-[#f4f4f5] text-[#52525b]'}`}>MODE: PRE-POLL</button>
-            <button onClick={() => setOperationMode("VOTING_DAY")} className={`text-left py-1 px-2 rounded ${operationMode === 'VOTING_DAY' ? 'bg-[#ea580c] text-white' : 'hover:bg-[#f4f4f5] text-[#ea580c]'}`}>MODE: VOTING DAY</button>
-            <button onClick={() => setOperationMode("COUNTING_DAY")} className={`text-left py-1 px-2 rounded ${operationMode === 'COUNTING_DAY' ? 'bg-[#dc2626] text-white' : 'hover:bg-[#f4f4f5] text-[#dc2626]'}`}>MODE: COUNTING DAY</button>
+            <button onClick={handleReset} className="text-left py-1.5 px-2 hover:bg-[#f4f4f5] rounded text-[#52525b] font-bold border border-[#e4e4e7]">1. RESET TO REAL TIME</button>
+            <button onClick={() => { setSimulatedDate(ELECTION_DATES.phase1); setOperationMode("VOTING_DAY"); }} className="text-left py-1.5 px-2 hover:bg-[#f4f4f5] rounded text-[#0284c7]">2. VOTING DAY 1 (APR 9)</button>
+            <button onClick={() => { setSimulatedDate(ELECTION_DATES.phase2); setOperationMode("VOTING_DAY"); }} className="text-left py-1.5 px-2 hover:bg-[#f4f4f5] rounded text-[#0284c7]">3. VOTING DAY 2 (APR 23)</button>
+            <button onClick={() => { setSimulatedDate(ELECTION_DATES.phase2b); setOperationMode("VOTING_DAY"); }} className="text-left py-1.5 px-2 hover:bg-[#f4f4f5] rounded text-[#0284c7]">4. VOTING DAY 2B (APR 29)</button>
+            <button onClick={() => { setSimulatedDate(ELECTION_DATES.counting); setOperationMode("COUNTING_DAY"); }} className="text-left py-1.5 px-2 hover:bg-[#f4f4f5] rounded text-[#ea580c]">5. COUNTING DAY (MAY 4)</button>
           </div>
         </div>
       )}

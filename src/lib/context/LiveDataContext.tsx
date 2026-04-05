@@ -7,6 +7,9 @@ interface LiveDataContextProps {
   constituencies: any[];
   candidates: any[];
   signals: any[];
+  turnoutData: any[];
+  exitPolls: any[];
+  liveResults: any[];
   isConnected: boolean;
   simulatedDate: Date | null;
   setSimulatedDate: (date: Date | null) => void;
@@ -15,14 +18,9 @@ interface LiveDataContextProps {
 }
 
 const LiveDataContext = createContext<LiveDataContextProps>({
-  constituencies: [],
-  candidates: [],
-  signals: [],
-  isConnected: false,
-  simulatedDate: null,
-  setSimulatedDate: () => { },
-  operationMode: "PRE-POLL",
-  setOperationMode: () => { },
+  constituencies: [], candidates: [], signals: [], turnoutData: [], exitPolls: [], liveResults: [],
+  isConnected: false, simulatedDate: null, setSimulatedDate: () => { },
+  operationMode: "PRE-POLL", setOperationMode: () => { },
 });
 
 export const useLiveData = () => useContext(LiveDataContext);
@@ -31,16 +29,18 @@ export const LiveDataProvider = ({ children }: { children: React.ReactNode }) =>
   const [constituencies, setConstituencies] = useState<any[]>([]);
   const [candidates, setCandidates] = useState<any[]>([]);
   const [signals, setSignals] = useState<any[]>([]);
+  const [turnoutData, setTurnoutData] = useState<any[]>([]);
+  const [exitPolls, setExitPolls] = useState<any[]>([]);
+  const [liveResults, setLiveResults] = useState<any[]>([]);
+
   const [isConnected, setIsConnected] = useState(false);
   const [simulatedDate, setSimulatedDate] = useState<Date | null>(null);
-
-  // Default to env, but allow UI override via Dev Menu
   const [operationMode, setOperationMode] = useState<string>(process.env.NEXT_PUBLIC_OPERATION_MODE || "PRE-POLL");
 
-  const fetchAllRows = async (table: string) => {
+  // Helper to bypass 1000 limit silently in the background
+  const fetchHeavyTable = async (table: string) => {
     let allData: any[] = [];
-    let from = 0;
-    const step = 1000;
+    let from = 0; const step = 1000;
     while (true) {
       const { data, error } = await supabase.from(table).select("*").range(from, from + step - 1);
       if (error || !data) break;
@@ -53,38 +53,56 @@ export const LiveDataProvider = ({ children }: { children: React.ReactNode }) =>
 
   useEffect(() => {
     let isMounted = true;
-    const initDb = async () => {
+
+    // 1. FAST PAYLOAD: Load Map, News, and HUD data instantly in parallel
+    const loadVanguardData = async () => {
       try {
-        const cwData = await fetchAllRows("constituencies");
-        if (isMounted && cwData) {
-          setIsConnected(true);
-          setConstituencies(cwData);
+        const [cwRes, sigRes, turnRes, exitRes, liveRes] = await Promise.all([
+          supabase.from("constituencies").select("*").limit(2000),
+          supabase.from("signals").select("*").order("created_at", { ascending: false }).limit(500),
+          supabase.from("voter_turnout").select("*"),
+          supabase.from("exit_polls").select("*"),
+          supabase.from("live_results").select("*")
+        ]);
+
+        if (isMounted) {
+          if (cwRes.data) setConstituencies(cwRes.data);
+          if (sigRes.data) setSignals(sigRes.data);
+          if (turnRes.data) setTurnoutData(turnRes.data);
+          if (exitRes.data) setExitPolls(exitRes.data);
+          if (liveRes.data) setLiveResults(liveRes.data);
+          setIsConnected(true); // Unblocks the UI instantly
         }
-
-        const cdData = await fetchAllRows("candidates");
-        if (isMounted && cdData) setCandidates(cdData);
-
-        const { data: sData } = await supabase.from("signals").select("*").order("created_at", { ascending: false }).limit(500);
-        if (isMounted && sData) setSignals(sData);
       } catch (err) {
-        console.error("[LiveDataContext] Supabase connection failed!", err);
+        console.error("[LiveDataContext] Fast Payload Failed", err);
       }
     };
 
-    initDb();
+    // 2. HEAVY PAYLOAD: Load Candidates in the background without blocking the UI
+    const loadHeavyData = async () => {
+      const cands = await fetchHeavyTable("candidates");
+      if (isMounted && cands) setCandidates(cands);
+    };
 
+    // Execute Sequence
+    loadVanguardData().then(() => loadHeavyData());
+
+    // 3. REALTIME LISTENERS
     const channel = supabase.channel("schema-db-changes")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "signals" }, (payload) => {
-        setSignals((prev) => [payload.new, ...prev]);
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "signals" }, (p) => {
+        if (isMounted) setSignals((prev) => [p.new, ...prev]);
       })
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "candidates" }, (payload) => {
-        setCandidates((prev) => [...prev, payload.new]);
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "candidates" }, (p) => {
+        if (isMounted) setCandidates((prev) => [...prev, p.new]);
       })
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "constituencies" }, (payload) => {
-        setConstituencies((prev) => prev.map((c) => (c.id === payload.new.id ? payload.new : c)));
+      // Targeted Refetches for War Room Data
+      .on("postgres_changes", { event: "*", schema: "public", table: "voter_turnout" }, async () => {
+        const { data } = await supabase.from("voter_turnout").select("*");
+        if (isMounted && data) setTurnoutData(data);
       })
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "candidates" }, (payload) => {
-        setCandidates((prev) => prev.map((c) => (c.id === payload.new.id ? payload.new : c)));
+      .on("postgres_changes", { event: "*", schema: "public", table: "live_results" }, async () => {
+        const { data } = await supabase.from("live_results").select("*");
+        if (isMounted && data) setLiveResults(data);
       })
       .subscribe();
 
@@ -95,7 +113,7 @@ export const LiveDataProvider = ({ children }: { children: React.ReactNode }) =>
   }, []);
 
   return (
-    <LiveDataContext.Provider value={{ constituencies, candidates, signals, isConnected, simulatedDate, setSimulatedDate, operationMode, setOperationMode }}>
+    <LiveDataContext.Provider value={{ constituencies, candidates, signals, turnoutData, exitPolls, liveResults, isConnected, simulatedDate, setSimulatedDate, operationMode, setOperationMode }}>
       {children}
     </LiveDataContext.Provider>
   );
