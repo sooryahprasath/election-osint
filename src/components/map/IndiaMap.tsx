@@ -58,6 +58,7 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
   const divRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
 
+  // Separated refs for Zero-Lag rendering
   const constituenciesGroupRef = useRef<L.LayerGroup | null>(null);
   const signalsGroupRef = useRef<L.LayerGroup | null>(null);
   const statesLayerRef = useRef<L.GeoJSON | null>(null);
@@ -66,7 +67,7 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
   const isVotingDay = operationMode === "VOTING_DAY";
   const isCountingDay = operationMode === "COUNTING_DAY";
 
-  // GLOBAL CLICK LISTENER (Bypasses React DOM for faster Tooltip clicks)
+  // GLOBAL CLICK LISTENER: Maps standard HTML clicks on tooltips back to React Router
   useEffect(() => {
     const handleCustomClick = (e: any) => {
       if (onSelectConstituency && e.detail) onSelectConstituency(e.detail);
@@ -81,7 +82,6 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
   useEffect(() => {
     if (!divRef.current || mapRef.current) return;
 
-    // Use Canvas for extreme marker rendering speed
     const map = L.map(divRef.current, {
       zoomControl: false, attributionControl: false, renderer: L.canvas({ padding: 0.5 }),
       maxBounds: MAX_BOUNDS, maxBoundsViscosity: 0.8, minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM,
@@ -89,12 +89,13 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
 
     mapRef.current = map;
 
-    // MASSIVE LAG FIX: Remove React `setState` during zoom. Use pure native CSS toggles.
-    map.on('zoomend', function () {
-      if (this.getZoom() >= 10) {
-        this.getContainer().classList.add('show-tooltips');
+    // HIGH PERFORMANCE FIX: Native DOM class toggle (Bypasses React lag completely)
+    // TypeScript Fix: Changed from function() to arrow function and used the 'map' variable directly
+    map.on('zoomend', () => {
+      if (map.getZoom() >= 10) {
+        map.getContainer().classList.add('show-tooltips');
       } else {
-        this.getContainer().classList.remove('show-tooltips');
+        map.getContainer().classList.remove('show-tooltips');
       }
     });
 
@@ -109,22 +110,22 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
     const loadMapData = async () => {
       try {
         const borderData = await fetch("/india.geojson").then(r => r.json());
-        if (mapRef.current) L.geoJSON(borderData, { pane: 'baseBorders', interactive: false, style: { color: "#d4d4d8", weight: 1.0, fill: false } }).addTo(mapRef.current);
+        if (mapRef.current) L.geoJSON(borderData, { pane: 'baseBorders', interactive: false, style: { color: "#71717a", weight: 1.5, fill: false } }).addTo(mapRef.current);
       } catch (e) { }
 
       try {
         const stateData = await fetch("/india-states.geojson").then(r => r.json());
         if (mapRef.current) {
 
-          // STRICT REQUEST 1: Draw Thick Dark Grey State Borders for Election States
+          // NEW: Thick State Borders for Target Election States (Unclickable base layer)
           L.geoJSON(stateData, {
             pane: 'baseBorders',
             interactive: false,
             filter: (feat) => NORMALIZED_TARGETS.includes((feat?.properties?.ST_NM || "").toLowerCase().replace(/\s+/g, '')),
-            style: { color: "#3f3f46", weight: 2.5, fillOpacity: 0 } // #3f3f46 is tactical dark grey
+            style: { color: "#52525b", weight: 2.0, fill: false }
           }).addTo(mapRef.current);
 
-          // Invisible layer to handle Hover/Click interactions cleanly without fighting the borders
+          // Clickable Interactive Fills
           statesLayerRef.current = L.geoJSON(stateData, {
             pane: 'interactiveStates',
             style: feat => {
@@ -132,7 +133,7 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
               const isElection = NORMALIZED_TARGETS.includes(name.toLowerCase().replace(/\s+/g, ''));
               return isElection
                 ? { color: "transparent", weight: 0, fillColor: "#52525b", fillOpacity: 0.15, interactive: true, className: "cursor-pointer outline-none" }
-                : { color: "transparent", weight: 0, fillColor: "#ffffff", fillOpacity: 0.0, interactive: false };
+                : { color: "#e4e4e7", weight: 0.8, fillColor: "#ffffff", fillOpacity: 0.0, interactive: false };
             },
             onEachFeature: (feat, layer: any) => {
               const name = feat?.properties?.ST_NM as string || "";
@@ -158,33 +159,53 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
   }, []);
 
   // ==========================================
-  // 2. CONST DOTS & FAST MUTATION (No React Lag)
+  // 2. CREATE CONSTITUENCIES ONCE (Zero-Lag Fix)
   // ==========================================
   useEffect(() => {
-    if (!mapRef.current || !constituenciesGroupRef.current) return;
+    if (!constituenciesGroupRef.current || constituencies.length === 0) return;
+    if (Object.keys(constMarkersRef.current).length > 0) return; // Prevent recreation loops
 
-    // Create markers only if they haven't been created yet
-    if (Object.keys(constMarkersRef.current).length === 0 && constituencies.length > 0) {
-      constituencies.forEach((c: any) => {
-        const m = L.circleMarker([c.latitude, c.longitude], {
-          radius: 4, color: "#ffffff", fillColor: "#16a34a", fillOpacity: 0.9, weight: 1.2,
-        });
+    constituencies.forEach((c: any) => {
+      const m = L.circleMarker([c.latitude, c.longitude], {
+        radius: 4, color: "#ffffff", fillColor: "#16a34a", fillOpacity: 0.9, weight: 1.2,
+      });
 
-        const tooltipHtml = `
-          <div onclick="window.dispatchEvent(new CustomEvent('selectConst', {detail: '${c.id}'}))" style="cursor:pointer; pointer-events:auto;" class="font-mono text-xs">
-            <b>${c.name}</b><br/><span style="color:#71717a">ID: ${c.id}</span>
-          </div>
-        `;
+      // FIX: Clickable Labels! HTML triggers standard DOM click event captured by React
+      const tooltipHtml = `
+        <div onclick="window.dispatchEvent(new CustomEvent('selectConst', {detail: '${c.id}'}))" style="cursor:pointer; pointer-events:auto;" class="font-mono text-xs">
+          <b>${c.name}</b><br/><span style="color:#71717a">ID: ${c.id}</span>
+        </div>
+      `;
 
-        m.bindTooltip(tooltipHtml, { permanent: true, direction: "top", offset: L.point(0, -8), className: "smart-tooltip" });
-        if (onSelectConstituency) m.on("click", () => onSelectConstituency(c.id));
+      m.bindTooltip(tooltipHtml, { permanent: true, direction: "top", offset: L.point(0, -8), className: "smart-tooltip" });
 
-        constMarkersRef.current[c.id] = m;
-        m.addTo(constituenciesGroupRef.current!);
+      if (onSelectConstituency) m.on("click", () => onSelectConstituency(c.id));
+
+      constMarkersRef.current[c.id] = m;
+      m.addTo(constituenciesGroupRef.current!);
+    });
+  }, [constituencies, onSelectConstituency]);
+
+  // ==========================================
+  // 3. FAST DOM MUTATION (Instant Style Updates)
+  // ==========================================
+  useEffect(() => {
+    if (statesLayerRef.current) {
+      statesLayerRef.current.eachLayer((layer: any) => {
+        const feat = layer.feature;
+        const name = feat?.properties?.ST_NM as string || "";
+        const normalizedName = name.toLowerCase().replace(/\s+/g, '');
+        if (!NORMALIZED_TARGETS.includes(normalizedName)) return;
+
+        const displayName = ELECTION_STATES.find(s => s.toLowerCase().replace(/\s+/g, '') === normalizedName) || name;
+
+        let fillOpacity = 0.15;
+        if (activeState !== "ALL" && activeState !== displayName) fillOpacity = 0.02;
+        else if (activeState === displayName) fillOpacity = 0.25;
+        layer.setStyle({ fillColor: "#52525b", fillOpacity: fillOpacity });
       });
     }
 
-    // Fast Update existing markers
     constituencies.forEach((c: any) => {
       const m = constMarkersRef.current[c.id];
       if (!m) return;
@@ -205,6 +226,7 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
         if (result && result.leading_party) color = PARTY_COLORS[result.leading_party] || metaColor;
       } else if (isVotingDay) {
         const t = c.turnout_percentage || 0;
+        // FIX: Guaranteed not to grey out if 0
         if (t > 0) {
           if (t < 40) color = "#93c5fd";
           else if (t < 60) color = "#3b82f6";
@@ -222,31 +244,15 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
         fillColor: color,
         fillOpacity: 0.9,
         weight: isSelected ? 2 : 1.2,
-        opacity: 1
+        opacity: 1 // Restore visibility
       });
 
       if (isSelected) m.bringToFront();
     });
-
-    // Update States visibility
-    if (statesLayerRef.current) {
-      statesLayerRef.current.eachLayer((layer: any) => {
-        const feat = layer.feature;
-        const name = feat?.properties?.ST_NM as string || "";
-        const normalizedName = name.toLowerCase().replace(/\s+/g, '');
-        if (!NORMALIZED_TARGETS.includes(normalizedName)) return;
-
-        const displayName = ELECTION_STATES.find(s => s.toLowerCase().replace(/\s+/g, '') === normalizedName) || name;
-        let fillOpacity = 0.15;
-        if (activeState !== "ALL" && activeState !== displayName) fillOpacity = 0.02;
-        else if (activeState === displayName) fillOpacity = 0.25;
-        layer.setStyle({ fillColor: "#52525b", fillOpacity: fillOpacity });
-      });
-    }
-  }, [activeState, activeConstituencyId, isVotingDay, isCountingDay, liveResults, constituencies, onSelectConstituency]);
+  }, [activeState, activeConstituencyId, isVotingDay, isCountingDay, liveResults, constituencies]);
 
   // ==========================================
-  // 3. RENDER SIGNALS & VIDEOS (STRICT FILTER)
+  // 4. RENDER SIGNALS/VIDEOS/IMAGES 
   // ==========================================
   useEffect(() => {
     if (!signalsGroupRef.current) return;
@@ -254,11 +260,6 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
 
     signals.forEach((s: any, index: number) => {
       if (activeState !== "ALL" && s.state !== activeState && s.state) return;
-
-      // STRICT REQUEST 2: Only show Videos OR High Severity (>= 4) News
-      const hasVideo = !!s.video_url;
-      const isHighSev = s.severity >= 4;
-      if (!hasVideo && !isHighSev) return;
 
       let lat = s.latitude; let lng = s.longitude; let isFallback = false;
 
@@ -272,7 +273,7 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
         if (s.state) {
           const stateConsts = constituencies.filter((c: any) => c.state === s.state);
           if (stateConsts.length > 0) {
-            const targetC = stateConsts[(index * 13) % stateConsts.length]; // Scatter inland
+            const targetC = stateConsts[(index * 13) % stateConsts.length]; // Scatter
             lat = targetC.latitude; lng = targetC.longitude;
           } else {
             lat = FALLBACK_COORDS[s.state]?.[0]; lng = FALLBACK_COORDS[s.state]?.[1];
@@ -283,42 +284,61 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
       }
 
       if (lat && lng) {
-        if (isFallback) { lat += (Math.random() - 0.5) * 0.08; lng += (Math.random() - 0.5) * 0.08; }
+        if (isFallback) { lat += (Math.random() - 0.5) * 0.05; lng += (Math.random() - 0.5) * 0.05; }
 
-        if (hasVideo) {
+        let borderColor = "#a1a1aa"; // Gray
+        if (s.severity >= 4 || s.category === 'breaking') borderColor = "#e4e4e7"; // White
+        else if (s.severity === 3 || s.category === 'alert') borderColor = "#d4d4d8"; // Light Gray
+        else if (s.category === 'official') borderColor = "#a1a1aa"; // Gray
+
+        // YOUTUBE VIDEO THUMBNAIL
+        if (s.video_url) {
           const videoIdMatch = s.video_url.match(/embed\/([^?]+)/);
           const videoId = videoIdMatch ? videoIdMatch[1] : null;
           const thumbnailUrl = videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : "";
 
-          // STRICT REQUEST 3 & 4: Videos are LARGER, wrapped in a pure White/Light Grey OSINT Theme
           const videoIcon = L.divIcon({
             className: "bg-transparent cursor-pointer",
             html: `
-              <div style="position: relative; width: 54px; height: 34px; border-radius: 4px; overflow: hidden; border: 2px solid #ffffff; box-shadow: 0 4px 10px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; background: #e4e4e7;">
-                <img src="${thumbnailUrl}" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;" />
-                <div style="background: #ffffff; color: #18181b; width: 16px; height: 12px; border-radius: 3px; display: flex; align-items: center; justify-content: center; z-index: 10; font-size: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.5);">▶</div>
+              <div style="position: relative; width: 36px; height: 24px; border-radius: 4px; overflow: hidden; border: 2px solid ${borderColor}; box-shadow: 0 2px 4px rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; background: #18181b;">
+                <img src="${thumbnailUrl}" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.8;" />
+                <div style="background: ${borderColor}; color: #18181b; width: 14px; height: 10px; border-radius: 2px; display: flex; align-items: center; justify-content: center; z-index: 10; font-size: 6px;">▶</div>
               </div>
             `,
-            iconSize: [54, 34]
+            iconSize: [36, 24]
           });
           const sm = L.marker([lat, lng], { icon: videoIcon, zIndexOffset: 1000 });
-          sm.bindTooltip(`<b style="color:#52525b; font-family: monospace;">[VIDEO]</b><br/><span style="font-size: 10px;">${s.title.substring(0, 40)}...</span>`, { direction: "top", offset: L.point(0, -15) });
+          sm.bindTooltip(`<b style="color:${borderColor}; font-family: monospace;">[VIDEO INTEL]</b><br/><span style="font-size: 10px;">${s.title.substring(0, 40)}...</span>`, { direction: "top", offset: L.point(0, -12) });
           if (onSelectSignal) sm.on("click", () => onSelectSignal(s));
           sm.addTo(signalsGroupRef.current!);
         }
-        else if (isHighSev && s.image_url) {
-          // STRICT REQUEST 3 & 4: News images are SMALLER, wrapped in Dark Grey Theme
+
+        // NEW: ARTICLE IMAGE THUMBNAIL (No play button)
+        else if (s.image_url && s.image_url.trim() !== "") {
           const imgIcon = L.divIcon({
             className: "bg-transparent cursor-pointer",
             html: `
-              <div style="position: relative; width: 36px; height: 24px; border-radius: 4px; overflow: hidden; border: 2px solid #52525b; box-shadow: 0 2px 6px rgba(0,0,0,0.3); background: #18181b;">
+              <div style="position: relative; width: 36px; height: 24px; border-radius: 4px; overflow: hidden; border: 2px solid ${borderColor}; box-shadow: 0 2px 4px rgba(0,0,0,0.5); background: #18181b;">
                 <img src="${s.image_url}" style="width: 100%; height: 100%; object-fit: cover; opacity: 0.9;" />
               </div>
             `,
             iconSize: [36, 24]
           });
           const sm = L.marker([lat, lng], { icon: imgIcon, zIndexOffset: 900 });
-          sm.bindTooltip(`<b style="color:#dc2626; font-family: monospace;">[SEV-${s.severity}]</b><br/><span style="font-size: 10px;">${s.title.substring(0, 40)}...</span>`, { direction: "top", offset: L.point(0, -12) });
+          sm.bindTooltip(`<b style="color:${borderColor}; font-family: monospace;">[PHOTO INTEL]</b><br/><span style="font-size: 10px;">${s.title.substring(0, 40)}...</span>`, { direction: "top", offset: L.point(0, -12) });
+          if (onSelectSignal) sm.on("click", () => onSelectSignal(s));
+          sm.addTo(signalsGroupRef.current!);
+        }
+
+        // STANDARD RADAR BLIP
+        else if (s.severity >= 3 || s.category === 'official') {
+          const radarIcon = L.divIcon({
+            className: "bg-transparent cursor-pointer",
+            html: `<div style="position: relative; width: 16px; height: 16px; transform: translate(-50%, -50%);"><div style="position: absolute; inset: 0; border-radius: 50%; border: 3px solid ${borderColor}; opacity: 0.4;"></div><div style="position: absolute; top: 50%; left: 50%; width: 6px; height: 6px; border-radius: 50%; background: ${borderColor}; transform: translate(-50%, -50%); border: 1px solid #ffffff;"></div></div>`,
+            iconSize: [0, 0]
+          });
+          const sm = L.marker([lat, lng], { icon: radarIcon });
+          sm.bindTooltip(`<b style="color:${borderColor}; font-family: monospace;">[SEV-${s.severity} INTEL]</b><br/><span style="font-size: 10px;">${s.title.substring(0, 40)}...</span>`, { direction: "right", offset: L.point(10, 0) });
           if (onSelectSignal) sm.on("click", () => onSelectSignal(s));
           sm.addTo(signalsGroupRef.current!);
         }
@@ -345,14 +365,15 @@ export default function IndiaMap({ flyToState, activeState, activeConstituencyId
 
   return (
     <>
+      {/* HIGH PERFORMANCE CSS: Opacity triggers GPU, bypassing layout recalculations */}
       <style dangerouslySetInnerHTML={{
         __html: `
-        /* HIGH PERFORMANCE CSS: GPU Opacity transitions bypass layout recalculation lag */
         .smart-tooltip { opacity: 0 !important; transition: opacity 0.2s; pointer-events: none !important; background: white; border: 1px solid #e4e4e7; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); padding: 4px 8px; }
         .leaflet-container.show-tooltips .smart-tooltip { opacity: 1 !important; pointer-events: auto !important; }
         .leaflet-interactive:hover + .leaflet-tooltip.smart-tooltip { opacity: 1 !important; pointer-events: auto !important; }
+        @keyframes ping { 75%, 100% { transform: scale(3); opacity: 0; } }
       `}} />
-      <div ref={divRef} style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", zIndex: 0, background: "#f4f4f5" }} />
+      <div ref={divRef} style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", zIndex: 0, background: "transparent" }} />
     </>
   );
 }
