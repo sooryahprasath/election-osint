@@ -39,6 +39,7 @@ export default function RootLayout({
         <LiveDataProvider>
           {children}
         </LiveDataProvider>
+        <Analytics />
       </body>
     </html>
   );
