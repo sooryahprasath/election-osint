@@ -13,9 +13,13 @@ export default function SignalPane({ globalStateFilter, setGlobalStateFilter, gl
 
   const liveStates = Array.from(new Set(constituencies.map((c: any) => c.state))).filter(Boolean) as string[];
 
+  // FIX: Find the state of the active constituency, or fallback to the global filter
+  const activeConst = constituencies.find((c: any) => c.id === globalConstituencyId);
+  const effectiveState = activeConst ? activeConst.state : globalStateFilter;
+
+  // FIX: Filter signals by the effective state so the user always sees relevant state-wide news
   const filteredSignals = signals.filter((s: any) => {
-    if (globalConstituencyId) return s.constituency_id === globalConstituencyId;
-    if (globalStateFilter !== "ALL") return s.state === globalStateFilter;
+    if (effectiveState !== "ALL") return s.state === effectiveState;
     return true;
   }).sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
@@ -31,25 +35,30 @@ export default function SignalPane({ globalStateFilter, setGlobalStateFilter, gl
         <span className="font-mono text-[10px] text-[#71717a]">{filteredSignals.length} ITEMS</span>
       </div>
 
-      {!globalConstituencyId && (
-        <div className="flex gap-1 px-2 py-1.5 border-b border-[#e4e4e7] overflow-x-auto shrink-0">
-          <button onClick={() => setGlobalStateFilter("ALL")} className={`px-2 py-0.5 font-mono text-[10px] rounded transition-colors shrink-0 ${globalStateFilter === "ALL" ? "bg-[#16a34a]/10 text-[#16a34a]" : "text-[#71717a]"}`}>ALL</button>
-          {liveStates.map((state) => {
-            const meta = STATE_META[state];
-            const isActive = globalStateFilter === state;
-            return (
-              <button
-                key={state}
-                onClick={() => setGlobalStateFilter(state)}
-                style={{ backgroundColor: isActive ? `${meta?.color}20` : 'transparent', color: isActive ? meta?.color : '#71717a' }}
-                className="px-2 py-0.5 font-mono text-[10px] font-bold rounded transition-colors shrink-0"
-              >
-                {meta?.abbr || state}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      {/* FIX: State filter is ALWAYS visible so user can escape */}
+      <div className="flex gap-1 px-2 py-1.5 border-b border-[#e4e4e7] overflow-x-auto shrink-0">
+        <button
+          onClick={() => setGlobalStateFilter("ALL")}
+          className={`px-2 py-0.5 font-mono text-[10px] rounded transition-colors shrink-0 ${effectiveState === "ALL" ? "bg-[#16a34a]/10 text-[#16a34a] border border-[#16a34a]/30" : "text-[#71717a] hover:text-[#52525b] border border-transparent"
+            }`}
+        >
+          ALL
+        </button>
+        {liveStates.map((state) => {
+          const meta = STATE_META[state];
+          const isActive = effectiveState === state;
+          return (
+            <button
+              key={state}
+              onClick={() => setGlobalStateFilter(state)}
+              style={{ backgroundColor: isActive ? `${meta?.color}20` : 'transparent', color: isActive ? meta?.color : '#71717a' }}
+              className="px-2 py-0.5 font-mono text-[10px] font-bold rounded transition-colors shrink-0"
+            >
+              {meta?.abbr || state}
+            </button>
+          );
+        })}
+      </div>
 
       <div className="flex-1 overflow-y-auto">
         <div className="border-b border-[#e4e4e7]">
@@ -67,9 +76,11 @@ export default function SignalPane({ globalStateFilter, setGlobalStateFilter, gl
           </button>
           {!collapsed.signals && (
             <div className="flex flex-col">
-              {filteredSignals.map((signal: any) => (
+              {filteredSignals.length > 0 ? filteredSignals.map((signal: any) => (
                 <SignalCard key={signal.id} signal={signal} onClick={() => onSelectSignal(signal)} />
-              ))}
+              )) : (
+                <div className="p-6 text-center font-mono text-[10px] text-[#a1a1aa]">No intelligence reports filed for this sector.</div>
+              )}
             </div>
           )}
         </div>
