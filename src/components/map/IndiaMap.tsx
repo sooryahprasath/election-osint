@@ -231,7 +231,7 @@ export default function IndiaMap({
       }}
     >
       <div className="w-full h-full relative flex items-center justify-center">
-        <ComposableMap projection={projectionConfig} width={800} height={isMobile ? 900 : 700} style={{ width: "100%", height: "100%", outline: "none" }}>
+        <ComposableMap projection={projectionConfig as any} width={800} height={isMobile ? 900 : 700} style={{ width: "100%", height: "100%", outline: "none" }}>
           <ZoomableGroup
             zoom={position.zoom}
             center={position.coordinates as [number, number]}
