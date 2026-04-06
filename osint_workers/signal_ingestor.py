@@ -88,6 +88,20 @@ def extract_article_data(url, fallback_html):
     return full_text[:3000], image_url
 
 
+def valid_india_coords(lat, lng):
+    """Return (lat, lng) floats if plausible for India, else None."""
+    if lat is None or lng is None:
+        return None
+    try:
+        lat_f = float(lat)
+        lng_f = float(lng)
+    except (TypeError, ValueError):
+        return None
+    if 6.0 <= lat_f <= 38.0 and 67.0 <= lng_f <= 98.0:
+        return lat_f, lng_f
+    return None
+
+
 def fetch_youtube_video(query):
     """Hits YouTube API safely. Costs 100 Units. Hard cap at 4500/day."""
     global YOUTUBE_QUOTA_USED
@@ -124,16 +138,22 @@ def analyze_and_insert(source_title, source_url, original_title, full_text, imag
     prompt = f"""
     You are a strictly accurate Election OSINT engine. {election_context}
     Analyze this news article: Title: {original_title} Body: {full_text}
-    
+
     Return pure JSON (No markdown):
     {{
         "state": "{state_context.replace('_', ' ')}",
-        "constituency_id": "Leave blank if unknown, else standard ID",
+        "constituency_id": "Blank if unknown, else exact internal ID from context if inferable",
         "severity": 1 to 5 integer (4 or 5 for extreme physical violence or major fraud only),
         "verified": true or false,
-        "bullets":["Bullet 1", "Bullet 2", "Bullet 3"],
-        "video_query": "Generate a 3 to 4 word YouTube search query for this news event (e.g. 'Kerala election rally', 'Assam CM speech'). DO NOT leave blank if it is a major political event."
+        "bullets": ["Bullet 1", "Bullet 2", "Bullet 3"],
+        "latitude": null or decimal degrees if the text implies a specific town/venue in India,
+        "longitude": null or decimal degrees (must pair with latitude),
+        "geo_confidence": 0.0 to 1.0 how sure you are about lat/long (0 if omitted),
+        "video_relevant": true only if a TV news clip or official rally video likely exists that matches THIS exact story; false for generic opinion, pure text, or when unsure,
+        "video_confidence": 0.0 to 1.0 confidence that a matching video exists,
+        "video_query": "Short 3-6 word YouTube search ONLY if video_relevant is true; else empty string"
     }}
+    Rules: Never guess lat/long from state alone. If video_relevant is false, video_query must be "".
     """
     try:
         response = gemini_client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
@@ -143,25 +163,47 @@ def analyze_and_insert(source_title, source_url, original_title, full_text, imag
         
         short_body = analysis.get("bullets", ["No summary available"])[0]
         c_id = analysis.get("constituency_id")
-        if c_id not in valid_c_ids: c_id = None
+        if c_id not in valid_c_ids:
+            c_id = None
         severity = analysis.get("severity", 1)
 
-        # LOOSENED THROTTLE: Fetch videos if severity >= 2 (captures tense rallies & speeches) OR if it's official Gov news
+        coords = valid_india_coords(analysis.get("latitude"), analysis.get("longitude"))
+        geo_c = float(analysis.get("geo_confidence") or 0)
+        if coords and geo_c < 0.45:
+            coords = None
+
         video_url = ""
-        vq = analysis.get("video_query", "")
-        if vq and len(vq) > 3 and (severity >= 2 or state_context == "Govt_Official"):
-            print(f"      -> Searching YouTube for: '{vq}'")
+        vq = (analysis.get("video_query") or "").strip()
+        vid_rel = analysis.get("video_relevant") is True
+        vid_conf = float(analysis.get("video_confidence") or 0)
+        if (
+            vid_rel
+            and vid_conf >= 0.62
+            and len(vq) > 3
+            and (severity >= 2 or state_context == "Govt_Official")
+        ):
+            print(f"      -> Searching YouTube for: '{vq}' (conf={vid_conf:.2f})")
             video_url = fetch_youtube_video(vq)
-        
+
+        row = {
+            "source": source_title,
+            "source_url": source_url,
+            "image_url": image_url,
+            "video_url": video_url,
+            "title": original_title,
+            "body": short_body,
+            "state": analysis.get("state"),
+            "constituency_id": c_id,
+            "severity": severity,
+            "verified": analysis.get("verified", False) or (state_context == "Govt_Official"),
+            "full_summary": analysis.get("bullets", []),
+            "category": "official" if state_context == "Govt_Official" else "alert",
+        }
+        if coords:
+            row["latitude"], row["longitude"] = coords[0], coords[1]
+
         if supabase:
-            supabase.table("signals").insert({
-                "source": source_title, "source_url": source_url, "image_url": image_url, "video_url": video_url,
-                "title": original_title, "body": short_body, "state": analysis.get("state"),
-                "constituency_id": c_id, "severity": severity,
-                "verified": analysis.get("verified", False) or (state_context == "Govt_Official"),
-                "full_summary": analysis.get("bullets",[]),
-                "category": "official" if state_context == "Govt_Official" else "alert"
-            }).execute()
+            supabase.table("signals").insert(row).execute()
             print(f"   ->[SUCCESS] Saved | SEV-{severity}")
     except Exception as e: print(f"   ->[LLM/DB Error]: {e}")
 
