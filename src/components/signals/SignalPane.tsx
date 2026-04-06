@@ -100,7 +100,7 @@ export default function SignalPane({ globalStateFilter, setGlobalStateFilter, gl
         })}
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto pb-24 max-md:pb-28 md:pb-3">
         {/* Video Intel Strip */}
         <div className="border-b border-[#e4e4e7]">
           <button

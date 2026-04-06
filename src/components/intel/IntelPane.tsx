@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Search, Filter, ChevronRight, AlertTriangle, HelpCircle, Activity } from "lucide-react";
+import { Search, Filter, ChevronRight, AlertTriangle, Activity } from "lucide-react";
 import { useLiveData } from "@/lib/context/LiveDataContext";
 import ConstituencyCard from "./ConstituencyCard";
 import StateOverview from "./StateOverview";
 import PhaseTimeline from "../signals/PhaseTimeline";
+import IntelHelpTip from "./IntelHelpTip";
 import { STATE_META } from "@/lib/utils/states";
 
 type SortMode = "VOLATILITY" | "NAME" | "PHASE";
@@ -105,7 +106,7 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
           <span className="font-mono text-[10px] text-[#71717a]">/</span>
           <span className="font-mono text-[10px] text-[#52525b] truncate">{selectedConstituency.name.toUpperCase()}</span>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y pb-20 max-md:pb-28">
           <ConstituencyCard constituency={selectedConstituency} />
         </div>
       </aside>
@@ -148,20 +149,21 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
       <StateOverview state={activeState} />
 
       <div className="border-b border-[#e4e4e7] shrink-0">
-        <div className="px-3 py-2 bg-[#f8fafc] flex items-center justify-between gap-2">
-          <span className="font-mono text-[10px] font-bold text-[#52525b] tracking-wider flex items-center gap-1.5">
-            <Activity className="h-3 w-3 text-[#dc2626] shrink-0" />
-            <span className="flex items-center gap-1">
-              HOTSPOTS (LAST 6H)
-              <span className="group relative cursor-help">
-                <HelpCircle className="h-2.5 w-2.5 text-[#a1a1aa]" />
-                <span className="absolute left-0 top-full mt-1 hidden group-hover:block bg-zinc-800 text-white text-[8px] font-normal tracking-normal p-2 rounded w-[220px] z-50 shadow-lg leading-snug normal-case">
-                  Constituencies where the sum of signal severities in the last 6 hours exceeds the prior 6-hour window (activity spike). Only rows with a resolved constituency_id are counted.
+        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 bg-[#f8fafc] px-3 py-2">
+          <span className="flex min-w-0 flex-1 items-center gap-1.5 font-mono text-[10px] font-bold tracking-wider text-[#52525b]">
+            <Activity className="h-3 w-3 shrink-0 text-[#dc2626]" />
+            <span className="flex min-w-0 flex-wrap items-center gap-1">
+              <span className="whitespace-nowrap">HOTSPOTS (LAST 6H)</span>
+              <IntelHelpTip label="What are hotspots?">
+                <span className="mb-1 block font-bold text-white">Hotspots (last 6 hours)</span>
+                Lists constituencies where <strong>OSINT attention spiked</strong>: we sum signal severity in the latest 6-hour window and compare it to the previous 6-hour window. A positive delta means more alert volume tied to that seat <em>right now</em> than just before.
+                <span className="mt-2 block border-t border-zinc-700 pt-2 text-zinc-400">
+                  Only signals with a resolved <code className="text-zinc-300">constituency_id</code> are counted. This is not a violence forecast—use it as a relative activity monitor.
                 </span>
-              </span>
+              </IntelHelpTip>
             </span>
           </span>
-          <span className="font-mono text-[9px] text-[#a1a1aa] shrink-0">TAP TO FOCUS</span>
+          <span className="shrink-0 font-mono text-[9px] text-[#a1a1aa]">TAP TO FOCUS</span>
         </div>
         {hotspots.length > 0 ? (
           <div className="px-2 pb-2">
@@ -227,16 +229,17 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y pb-20 max-md:pb-28">
         <div className="px-2 py-1.5 flex justify-between items-center bg-[#f4f4f5] border-b border-[#e4e4e7]">
           <span className="font-mono text-[8px] text-[#71717a] tracking-wider flex items-center gap-1">
             SORT METRIC
-            <span className="group relative cursor-help">
-              <HelpCircle className="h-2 w-2" />
-              <div className="absolute left-0 top-full mt-1 hidden group-hover:block bg-zinc-800 text-white text-[8px] p-2 rounded w-52 z-50 leading-snug normal-case font-normal tracking-normal">
-                Stored 0–100 score per constituency from the data pipeline (contest pressure, candidate-risk hints, and severe OSINT signals where wired in). Not a poll; refine the worker formula as ECI/ADR fields land.
-              </div>
-            </span>
+            <IntelHelpTip label="What is volatility?">
+              <span className="mb-1 block font-bold text-white">Volatility index (0–100)</span>
+              A <strong>deterministic mathematical score</strong> (not a poll): recomputed from your database by the intel worker from (1) contest size—extra candidates beyond a two-way race, (2) affidavit risk—criminal-case counts capped and summed, (3) OSINT load—severity-weighted signals in the last 14 days with a resolved constituency. Components are capped and summed, then clamped to 0–100.
+              <span className="mt-2 block border-t border-zinc-700 pt-2 text-zinc-400">
+                Run <code className="text-zinc-300">python intel_ingestor.py</code> on a schedule to refresh scores after candidates/signals change.
+              </span>
+            </IntelHelpTip>
           </span>
           <select value={sortMode} onChange={(e) => setSortMode(e.target.value as SortMode)} className="bg-transparent font-mono text-[9px] font-bold text-[#52525b] outline-none cursor-pointer">
             <option value="VOLATILITY">VOLATILITY (DESC)</option>

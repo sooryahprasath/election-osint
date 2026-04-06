@@ -121,6 +121,23 @@ def extract_article_data(url, fallback_html):
     return full_text[:3000], image_url
 
 
+def _norm_title(t: str) -> str:
+    return " ".join((t or "").strip().lower().split())
+
+
+def _norm_url(u: str) -> str:
+    try:
+        p = urllib.parse.urlparse((u or "").strip())
+        netloc = (p.netloc or "").lower()
+        path = (p.path or "").rstrip("/").lower()
+        scheme = (p.scheme or "https").lower()
+        if not netloc:
+            return (u or "").strip().lower()
+        return f"{scheme}://{netloc}{path}"
+    except Exception:
+        return (u or "").strip().lower()
+
+
 def valid_india_coords(lat, lng):
     """Return (lat, lng) floats if plausible for India, else None."""
     if lat is None or lng is None:
@@ -238,7 +255,11 @@ def analyze_and_insert(source_title, source_url, original_title, full_text, imag
         if supabase:
             supabase.table("signals").insert(row).execute()
             print(f"   ->[SUCCESS] Saved | SEV-{severity}")
-    except Exception as e: print(f"   ->[LLM/DB Error]: {e}")
+            return True
+        return False
+    except Exception as e:
+        print(f"   ->[LLM/DB Error]: {e}")
+        return False
 
 def generate_ai_briefing():
     print("\n[+] Compiling Dynamic 24-Hour AI Briefing...")
@@ -310,18 +331,37 @@ def fetch_and_ingest():
     
     valid_c_ids = [row["id"] for row in supabase.table("constituencies").select("id").execute().data] if supabase else[]
 
+    seen_titles: set[str] = set()
+    seen_urls: set[str] = set()
+    if supabase:
+        try:
+            since = (datetime.now(IST) - timedelta(days=3)).isoformat()
+            recent = (
+                supabase.table("signals")
+                .select("title,source_url")
+                .gte("created_at", since)
+                .limit(1200)
+                .execute()
+            )
+            for row in recent.data or []:
+                if row.get("title"):
+                    seen_titles.add(_norm_title(row["title"]))
+                if row.get("source_url"):
+                    seen_urls.add(_norm_url(row["source_url"]))
+        except Exception as e:
+            print(f"   [dedupe] could not load recent signals: {e}")
+
     for state_name, url in FEEDS.items():
         try:
             feed = feedparser.parse(url)
             for entry in feed.entries[:4]:
                 title = entry.title
-                
-                if supabase:
-                    existing = supabase.table("signals").select("id").eq("title", title).execute()
-                    if len(existing.data) > 0:
-                        continue 
+                link = entry.link or ""
 
-                link = entry.link
+                nt = _norm_title(title)
+                nu = _norm_url(link)
+                if nt in seen_titles or (nu and nu in seen_urls):
+                    continue
                 summary_html = getattr(entry, 'summary', '')
                 source_name = getattr(entry.source, 'title', 'News') if hasattr(entry, 'source') else "News Network"
                 
@@ -333,8 +373,12 @@ def fetch_and_ingest():
 
                 print(f"-> Found: {title[:60]}...")
                 full_text, image_url = extract_article_data(link, summary_html)
-                if len(full_text) > 50: 
-                    analyze_and_insert(source_name, link, title, full_text, image_url, state_name, valid_c_ids)
+                if len(full_text) > 50:
+                    ok = analyze_and_insert(source_name, link, title, full_text, image_url, state_name, valid_c_ids)
+                    if ok:
+                        seen_titles.add(nt)
+                        if nu:
+                            seen_urls.add(nu)
                     
         except Exception: pass
         gc.collect() 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Calendar, CheckCircle2, Clock } from "lucide-react";
+import { Calendar, CheckCircle2, Clock, ChevronDown, ChevronRight } from "lucide-react";
 import { ELECTION_DATES } from "@/lib/utils/countdown";
 import { useLiveData } from "@/lib/context/LiveDataContext";
 import { istMinutesSinceMidnight, sameISTCalendarDay, toISTParts, WAR_ROOM_IST } from "@/lib/utils/warRoomSchedule";
@@ -21,6 +21,7 @@ const PHASES = [
 export default function PhaseTimeline() {
   const { simulatedDate } = useLiveData();
   const [now, setNow] = useState(simulatedDate || new Date());
+  const [expanded, setExpanded] = useState(true);
 
   useEffect(() => {
     if (simulatedDate) {
@@ -35,12 +36,20 @@ export default function PhaseTimeline() {
 
   return (
     <div className="px-3 py-3">
-      <div className="mb-2 flex items-center justify-between border-b border-[#e4e4e7] pb-2">
-        <span className="font-mono text-[9px] font-bold text-[#52525b] tracking-wider">ELECTION TIMELINE</span>
-        <span className="font-mono text-[8px] text-[#a1a1aa]" suppressHydrationWarning>
+      <button
+        type="button"
+        onClick={() => setExpanded((e) => !e)}
+        className="mb-2 flex w-full items-center justify-between gap-2 border-b border-[#e4e4e7] pb-2 text-left hover:opacity-90"
+      >
+        <span className="flex items-center gap-1.5 font-mono text-[9px] font-bold tracking-wider text-[#52525b]">
+          {expanded ? <ChevronDown className="h-3 w-3 shrink-0 text-[#71717a]" /> : <ChevronRight className="h-3 w-3 shrink-0 text-[#71717a]" />}
+          ELECTION TIMELINE
+        </span>
+        <span className="shrink-0 font-mono text-[8px] text-[#a1a1aa]" suppressHydrationWarning>
           IST {now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false })}
         </span>
-      </div>
+      </button>
+      {expanded && (
       <div className="relative">
         <div className="absolute left-[7px] top-2 bottom-2 w-px bg-[#e4e4e7]" />
         {PHASES.map((phase) => {
@@ -114,6 +123,7 @@ export default function PhaseTimeline() {
           );
         })}
       </div>
+      )}
     </div>
   );
 }

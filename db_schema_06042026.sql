@@ -1,5 +1,11 @@
--- DHARMA-OSINT Production Schema
--- Last Updated: April 2026
+-- DHARMA-OSINT — canonical database schema (single source of truth)
+-- Last updated: April 2026
+--
+-- Fresh project: run this whole file in the Supabase SQL editor (new project).
+-- Live project already on older schema: use only the sections you need (indexes, RLS, comments),
+-- or export with CLI: `supabase link` then `supabase db dump --schema public`.
+--
+-- Note: `ALTER PUBLICATION ... ADD TABLE` may error if a table is already in the publication — safe to ignore.
 
 -- Drop existing tables to ensure a clean deployment in sandbox environments
 DROP TABLE IF EXISTS briefings CASCADE;
@@ -24,6 +30,7 @@ CREATE TABLE constituencies (
     longitude DOUBLE PRECISION,
     geojson_blob JSONB,
     volatility_score REAL,
+    volatility_updated_at TIMESTAMP WITH TIME ZONE,
     status TEXT,
     turnout_percentage REAL,
     bbox JSONB,
@@ -53,6 +60,13 @@ CREATE TABLE candidates (
     is_independent BOOLEAN,
     photo_url TEXT,
     myneta_url TEXT,
+    liabilities_value BIGINT,
+    myneta_candidate_id TEXT,
+    eci_affidavit_url TEXT,
+    eci_last_synced_at TIMESTAMP WITH TIME ZONE,
+    myneta_last_synced_at TIMESTAMP WITH TIME ZONE,
+    removed BOOLEAN NOT NULL DEFAULT false,
+    removed_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
 );
 
@@ -133,4 +147,61 @@ alter publication supabase_realtime add table candidates;
 alter publication supabase_realtime add table signals;
 alter publication supabase_realtime add table briefings;
 alter publication supabase_realtime add table voter_turnout;
+alter publication supabase_realtime add table exit_polls;
 alter publication supabase_realtime add table live_results;
+
+-- ── Column documentation ─────────────────────────────────────────
+comment on column public.constituencies.volatility_score is
+  '0–100 deterministic index: contest + affidavit risk + recent OSINT (see osint_workers/intel_ingestor.py)';
+comment on column public.constituencies.volatility_updated_at is
+  'Last successful update from intel_ingestor';
+
+-- ── Indexes (idempotent) ─────────────────────────────────────────
+create index if not exists idx_candidates_constituency_id on public.candidates (constituency_id);
+create index if not exists idx_candidates_removed on public.candidates (removed);
+create index if not exists idx_candidates_myneta_candidate_id on public.candidates (myneta_candidate_id);
+
+-- ── Row level security (anon = read-only; service role bypasses RLS) ──
+alter table public.constituencies enable row level security;
+alter table public.candidates enable row level security;
+alter table public.signals enable row level security;
+alter table public.briefings enable row level security;
+alter table public.voter_turnout enable row level security;
+alter table public.exit_polls enable row level security;
+alter table public.live_results enable row level security;
+
+revoke all on table public.constituencies from anon, authenticated;
+revoke all on table public.candidates from anon, authenticated;
+revoke all on table public.signals from anon, authenticated;
+revoke all on table public.briefings from anon, authenticated;
+revoke all on table public.voter_turnout from anon, authenticated;
+revoke all on table public.exit_polls from anon, authenticated;
+revoke all on table public.live_results from anon, authenticated;
+
+grant select on table public.constituencies to anon, authenticated;
+grant select on table public.candidates to anon, authenticated;
+grant select on table public.signals to anon, authenticated;
+grant select on table public.briefings to anon, authenticated;
+grant select on table public.voter_turnout to anon, authenticated;
+grant select on table public.exit_polls to anon, authenticated;
+grant select on table public.live_results to anon, authenticated;
+
+drop policy if exists "public_read_constituencies" on public.constituencies;
+drop policy if exists "public_read_candidates" on public.candidates;
+drop policy if exists "public_read_signals" on public.signals;
+drop policy if exists "public_read_briefings" on public.briefings;
+drop policy if exists "public_read_voter_turnout" on public.voter_turnout;
+drop policy if exists "public_read_exit_polls" on public.exit_polls;
+drop policy if exists "public_read_live_results" on public.live_results;
+
+create policy "public_read_constituencies" on public.constituencies for select using (true);
+create policy "public_read_candidates" on public.candidates for select using (true);
+create policy "public_read_signals" on public.signals for select using (true);
+create policy "public_read_briefings" on public.briefings for select using (true);
+create policy "public_read_voter_turnout" on public.voter_turnout for select using (true);
+create policy "public_read_exit_polls" on public.exit_polls for select using (true);
+create policy "public_read_live_results" on public.live_results for select using (true);
+
+-- ── Legacy DBs only: drop stale nomination_status CHECK if ingest fails ──
+alter table public.candidates
+  drop constraint if exists candidates_nomination_status_check;

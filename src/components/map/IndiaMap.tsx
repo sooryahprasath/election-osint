@@ -37,8 +37,8 @@ const PARTY_COLORS: Record<string, string> = {
 };
 
 const THEME = {
-  districtFill: "#fafafa",
-  districtStroke: "#e4e4e7",
+  districtFill: "#f1f5f9",
+  districtStroke: "#64748b",
 };
 
 /** Hex #RRGGBB + alpha suffix for SVG fill (8-digit hex). */
@@ -54,6 +54,22 @@ function isValidSignalCoords(lat: unknown, lng: unknown): boolean {
   return lat >= 6 && lat <= 38 && lng >= 67 && lng <= 98;
 }
 
+/** Prefer constituency centroid when AI coords are missing or implausibly far from the linked seat (e.g. ocean / wrong state). */
+function displayCoordsForSignal(s: any, constById: Map<string, any>): { lat: number; lng: number } | null {
+  const c = s.constituency_id ? constById.get(String(s.constituency_id)) : null;
+  const aiOk = isValidSignalCoords(s.latitude, s.longitude);
+  if (c && typeof c.latitude === "number" && typeof c.longitude === "number") {
+    if (!aiOk) return { lat: c.latitude, lng: c.longitude };
+    const d = Math.hypot(Number(s.latitude) - c.latitude, Number(s.longitude) - c.longitude);
+    if (d > 0.65) return { lat: c.latitude, lng: c.longitude };
+  }
+  if (aiOk) return { lat: Number(s.latitude), lng: Number(s.longitude) };
+  if (c && typeof c.latitude === "number" && typeof c.longitude === "number") {
+    return { lat: c.latitude, lng: c.longitude };
+  }
+  return null;
+}
+
 export interface IndiaMapProps {
   flyToState?: string | null;
   activeState?: string;
@@ -67,6 +83,10 @@ export interface IndiaMapProps {
   verifiedOnly?: boolean;
   onChangeOverlayMode?: (mode: "VIDEOS" | "ALL") => void;
   onToggleVerifiedOnly?: () => void;
+  /** When set, clustered pins (ALL mode) with 2+ items open this instead of only the top signal. */
+  onSelectSignalCluster?: (signals: any[]) => void;
+  /** Hide floating map chrome on mobile when Signals/Intel sheet is open (avoids overlap). */
+  mobilePane?: "signals" | "map" | "intel" | "warroom";
 }
 
 // Map Centers Dictionary for perfectly locked zooming
@@ -91,6 +111,8 @@ export default function IndiaMap({
   verifiedOnly = false,
   onChangeOverlayMode,
   onToggleVerifiedOnly,
+  onSelectSignalCluster,
+  mobilePane = "map",
 }: IndiaMapProps) {
   const { constituencies, signals, operationMode, liveResults } = useLiveData();
 
@@ -104,6 +126,7 @@ export default function IndiaMap({
   const [mapShellOpacity, setMapShellOpacity] = useState(1);
   const [mapLayersOpen, setMapLayersOpen] = useState(false);
   const mapLayersWrapRef = useRef<HTMLDivElement>(null);
+  const hideMapChrome = isMobile && mobilePane !== "map";
 
   const tooltipRef = useRef<HTMLDivElement>(null);
   const positionRef = useRef({ coordinates: getCenterCoords("India") as [number, number], zoom: 1 });
@@ -291,15 +314,19 @@ export default function IndiaMap({
       stateGroups[st].push(v);
     });
 
+    const constById = new Map<string, any>();
+    for (const c of constituencies) constById.set(String(c.id), c);
+
     const mapped: any[] = [];
     Object.keys(stateGroups).forEach(st => {
       const stateSignals = stateGroups[st];
       const stateConsts = constituencies.filter(c => c.state === st);
 
       stateSignals.forEach((sig, index) => {
-        if (isValidSignalCoords(sig.latitude, sig.longitude)) {
-          sig.render_lng = sig.longitude;
-          sig.render_lat = sig.latitude;
+        const snapped = displayCoordsForSignal(sig, constById);
+        if (snapped) {
+          sig.render_lng = snapped.lng;
+          sig.render_lat = snapped.lat;
         } else if (stateConsts.length > 0) {
           const step = Math.max(1, Math.floor(stateConsts.length / stateSignals.length));
           const targetConst = stateConsts[(index * step) % stateConsts.length];
@@ -329,39 +356,37 @@ export default function IndiaMap({
         ? (z < 1.8 ? 2.0 : z < 3 ? 1.0 : 0.6)
         : (z < 2.2 ? 0.35 : z < 4 ? 0.18 : 0.10);
 
-    const groups = new Map<string, { lat: number; lng: number; count: number; top: any; newestTs: number }>();
+    const groups = new Map<string, { lat: number; lng: number; items: any[]; newestTs: number }>();
 
     for (const s of visibleSignals) {
-      // ignore signals with no useful spatial hint at all
-      const c = s.constituency_id ? constById.get(String(s.constituency_id)) : null;
-      const lat = s.latitude ?? c?.latitude;
-      const lng = s.longitude ?? c?.longitude;
-      if (typeof lat !== "number" || typeof lng !== "number") continue;
+      const pos = displayCoordsForSignal(s, constById);
+      if (!pos) continue;
 
-      const keyLat = Math.round(lat / cellDeg) * cellDeg;
-      const keyLng = Math.round(lng / cellDeg) * cellDeg;
+      const keyLat = Math.round(pos.lat / cellDeg) * cellDeg;
+      const keyLng = Math.round(pos.lng / cellDeg) * cellDeg;
       const key = `${keyLat.toFixed(4)}_${keyLng.toFixed(4)}`;
 
       const createdAt = Date.parse(s.created_at || "") || 0;
-      const sev = s.severity || 1;
 
       const existing = groups.get(key);
       if (!existing) {
-        groups.set(key, { lat: keyLat, lng: keyLng, count: 1, top: s, newestTs: createdAt });
+        groups.set(key, { lat: keyLat, lng: keyLng, items: [s], newestTs: createdAt });
       } else {
-        existing.count += 1;
-        // pick representative: highest severity, then newest
-        const existingSev = existing.top?.severity || 1;
-        const existingTs = Date.parse(existing.top?.created_at || "") || 0;
-        if (sev > existingSev || (sev === existingSev && createdAt > existingTs)) {
-          existing.top = s;
-        }
+        existing.items.push(s);
         if (createdAt > existing.newestTs) existing.newestTs = createdAt;
       }
     }
 
-    // deterministic ordering helps React stability
-    return Array.from(groups.values()).sort((a, b) => b.newestTs - a.newestTs);
+    const clusters = Array.from(groups.values()).map((g) => {
+      const items = [...g.items].sort((a, b) => {
+        const ds = (b.severity || 1) - (a.severity || 1);
+        if (ds !== 0) return ds;
+        return (Date.parse(b.created_at || "") || 0) - (Date.parse(a.created_at || "") || 0);
+      });
+      return { ...g, items, count: items.length, top: items[0] };
+    });
+
+    return clusters.sort((a, b) => b.newestTs - a.newestTs);
   }, [overlayMode, visibleSignals, constituencies, currentView, position.zoom]);
 
   // ------------------------------------------------------------------
@@ -375,37 +400,50 @@ export default function IndiaMap({
   const fS = Math.max(1.2, 4.5 / zoomFactor); // Dynamic Font Size
   const sW = 1.0 / zoomFactor;             // FIX: Restored Stroke Width Variable!
 
-  const mapFrameStyle = {
-    height: "calc(100vh - 36px - var(--war-hud-reserve, 0px) - var(--map-footer-stack, 28px))",
+  /* TopBar is position:fixed and does not consume flow. Do NOT subtract 36px from height + start at y=0
+   * (that leaves a topbar-sized gap above the footer). Use pt-9 and height = 100vh − footer − HUD only. */
+  const mapShellStyle = {
+    height: "calc(100vh - var(--war-hud-reserve, 0px) - var(--map-footer-stack, 28px))",
   } as const;
 
   if (mapError)
     return (
-      <div className="w-full flex items-center justify-center font-mono text-red-500" style={mapFrameStyle}>
-        <b>Map Data Missing!</b>
+      <div
+        className="box-border flex w-full min-h-0 flex-col pt-9"
+        style={mapShellStyle}
+      >
+        <div className="flex min-h-0 flex-1 items-center justify-center font-mono text-red-500">
+          <b>Map Data Missing!</b>
+        </div>
       </div>
     );
   if (!geoData)
     return (
-      <div className="w-full flex items-center justify-center font-mono text-zinc-400 bg-transparent" style={mapFrameStyle}>
-        INITIALIZING TACTICAL MAP...
+      <div
+        className="box-border flex w-full min-h-0 flex-col bg-transparent pt-9"
+        style={mapShellStyle}
+      >
+        <div className="flex min-h-0 flex-1 items-center justify-center font-mono text-zinc-400">
+          INITIALIZING TACTICAL MAP...
+        </div>
       </div>
     );
 
   return (
-    <div
-      className="relative w-full flex flex-col items-center justify-center overflow-hidden min-h-0"
-      style={{
-        ...mapFrameStyle,
-        backgroundColor: "#f1f5f9",
-        backgroundImage: "radial-gradient(#cbd5e1 1px, transparent 1px)",
-        backgroundSize: "24px 24px",
-      }}
-    >
-      {/* Map layers: FAB + sheet — keeps the map clear; mirrors legend inset from sidebars on md+ */}
+    <div className="box-border flex w-full min-h-0 flex-col pt-9" style={mapShellStyle}>
+      <div
+        className="relative min-h-0 w-full flex-1 overflow-hidden"
+        style={{
+          backgroundColor: "#cbd5e1",
+          backgroundImage: "radial-gradient(rgba(51,65,85,0.14) 1px, transparent 1px)",
+          backgroundSize: "20px 20px",
+        }}
+      >
+      {/* Map chrome hidden on mobile when Signals/Intel sheet is open; z-55 clears the thumb tab bar on map view */}
+      {!hideMapChrome && (
       <div
         ref={mapLayersWrapRef}
-        className="absolute bottom-2 right-2 z-40 flex flex-col items-end gap-1.5 pointer-events-auto select-none md:bottom-3 md:right-[292px]"
+        className="absolute bottom-16 right-2 z-[55] flex flex-col items-end gap-1.5 pointer-events-auto select-none max-md:bottom-[4.75rem] md:bottom-3 md:right-[292px] md:z-40"
       >
         {mapLayersOpen && (
           <div
@@ -461,10 +499,11 @@ export default function IndiaMap({
           <Layers className="h-4 w-4" strokeWidth={2} />
         </button>
       </div>
+      )}
 
-      {/* Legend: tucked to map bottom (footer already reserved via --map-footer-stack) */}
-      <div className="pointer-events-none absolute bottom-2 left-2 z-30 max-w-[9.5rem] select-none md:bottom-3 md:left-[292px] md:max-w-[13rem]">
-        <div className="rounded-md border border-[#e4e4e7]/80 bg-white/80 px-2 py-1 shadow-sm backdrop-blur-sm">
+      {!hideMapChrome && (
+      <div className="pointer-events-none absolute bottom-16 left-2 z-[55] max-w-[9.5rem] select-none max-md:bottom-[4.75rem] md:bottom-3 md:left-[292px] md:z-30 md:max-w-[13rem]">
+        <div className="rounded-md border border-[#e4e4e7]/80 bg-white/85 px-2 py-1 shadow-sm backdrop-blur-sm">
           <div className="mb-0.5 font-mono text-[7px] font-bold tracking-wider text-[#71717a]">LEGEND</div>
           {operationMode === "VOTING_DAY" ? (
             <p className="font-mono text-[7px] leading-snug text-[#52525b] md:text-[8px]">Dots = turnout (low→high).</p>
@@ -478,12 +517,18 @@ export default function IndiaMap({
           </p>
         </div>
       </div>
+      )}
 
       <div
-        className="w-full h-full relative flex items-center justify-center transition-opacity duration-300 ease-out"
+        className="absolute inset-0 transition-opacity duration-300 ease-out"
         style={{ opacity: mapShellOpacity }}
       >
-        <ComposableMap projection={projectionConfig as any} width={800} height={isMobile ? 900 : 700} style={{ width: "100%", height: "100%", outline: "none" }}>
+        <ComposableMap
+          projection={projectionConfig as any}
+          width={800}
+          height={isMobile ? 900 : 700}
+          style={{ width: "100%", height: "100%", display: "block", outline: "none" }}
+        >
           <ZoomableGroup
             zoom={position.zoom}
             center={position.coordinates as [number, number]}
@@ -523,15 +568,15 @@ export default function IndiaMap({
                   const metaColor = STATE_META[stateName]?.color || "#16a34a";
 
                   let fill = "#ffffff";
-                  let stroke = "#e4e4e7";
-                  let strokeWidth = 0.5 / zoomFactor;
+                  let stroke = "#64748b";
+                  let strokeWidth = 0.65 / zoomFactor;
 
                   const isStateView = currentView !== "India";
                   if (currentView === "India") {
                     if (isTargetState) {
-                      fill = withAlpha(metaColor, "1f");
-                      stroke = withAlpha(metaColor, "55");
-                      strokeWidth = 1.0 / zoomFactor;
+                      fill = withAlpha(metaColor, "28");
+                      stroke = withAlpha(metaColor, "aa");
+                      strokeWidth = 1.05 / zoomFactor;
                     }
                   } else {
                     fill = THEME.districtFill;
@@ -738,28 +783,73 @@ export default function IndiaMap({
               const sev = top?.severity || 1;
               const color = sev >= 4 ? "#dc2626" : sev >= 3 ? "#ea580c" : "#16a34a";
               const r = (2.2 + Math.min(8, Math.log2(Math.max(1, c.count)) * 2.2)) / zoomFactor;
+              const rawTitle = String(top?.title || "Signal");
+              const label = rawTitle.length > 20 ? `${rawTitle.slice(0, 20)}…` : rawTitle;
+              const fs = Math.max(2.8, 6.2 / zoomFactor);
+              const subFs = Math.max(2.4, 5.4 / zoomFactor);
               return (
                 <Marker key={`cluster-${idx}-${c.lat}-${c.lng}`} coordinates={[c.lng, c.lat]}>
                   <g
                     className="cursor-pointer"
-                    onClick={(e) => { e.stopPropagation(); if (onSelectSignal) onSelectSignal(top); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (c.items.length > 1 && onSelectSignalCluster) onSelectSignalCluster(c.items);
+                      else if (onSelectSignal) onSelectSignal(top);
+                    }}
                     onMouseEnter={() => {
                       setConstituencyTip(null);
-                      setTooltipContent(`${c.count} SIGNALS • TOP SEV-${sev}`);
+                      setTooltipContent(
+                        c.count > 1
+                          ? `${c.count} SIGNALS · ${rawTitle.slice(0, 56)}${rawTitle.length > 56 ? "…" : ""}`
+                          : rawTitle.slice(0, 72)
+                      );
                     }}
                     onMouseLeave={() => setTooltipContent("")}
                   >
                     <circle r={r + 0.15 / zoomFactor} fill="#ffffff" opacity={0.35} stroke="none" />
                     <circle r={r} fill={color} opacity={0.92} stroke="#ffffff" strokeWidth={0.85 / zoomFactor} />
-                    {c.count > 1 && (
+                    {c.count > 1 ? (
                       <text
                         textAnchor="middle"
-                        alignmentBaseline="middle"
+                        dominantBaseline="middle"
                         style={{ fontFamily: "monospace", fontSize: `${Math.max(2.5, 7 / zoomFactor)}px`, fontWeight: "bold", fill: "#ffffff", pointerEvents: "none" }}
                       >
                         {c.count}
                       </text>
-                    )}
+                    ) : null}
+                    <text
+                      textAnchor="middle"
+                      y={r + subFs * 1.35}
+                      style={{
+                        fontFamily: "monospace",
+                        fontSize: `${subFs}px`,
+                        fontWeight: "600",
+                        fill: "#1e293b",
+                        stroke: "#ffffff",
+                        strokeWidth: 0.35 / zoomFactor,
+                        paintOrder: "stroke fill",
+                        pointerEvents: "none",
+                      }}
+                    >
+                      {label}
+                    </text>
+                    {c.count > 1 ? (
+                      <text
+                        textAnchor="middle"
+                        y={r + subFs * 2.65}
+                        style={{
+                          fontFamily: "monospace",
+                          fontSize: `${fs * 0.85}px`,
+                          fill: "#64748b",
+                          stroke: "#ffffff",
+                          strokeWidth: 0.25 / zoomFactor,
+                          paintOrder: "stroke fill",
+                          pointerEvents: "none",
+                        }}
+                      >
+                        {c.count} stacked · tap for list
+                      </text>
+                    ) : null}
                   </g>
                 </Marker>
               );
@@ -767,6 +857,7 @@ export default function IndiaMap({
 
           </ZoomableGroup>
         </ComposableMap>
+      </div>
       </div>
 
       {(tooltipContent || constituencyTip) && (

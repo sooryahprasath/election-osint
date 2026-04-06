@@ -8,6 +8,7 @@ import BottomBar from "@/components/BottomBar";
 import SignalPane from "@/components/signals/SignalPane";
 import IntelPane from "@/components/intel/IntelPane";
 import SignalModal from "@/components/signals/SignalModal";
+import SignalClusterModal from "@/components/signals/SignalClusterModal";
 import VotingHud from "@/components/warroom/VotingHud";
 import { useLiveData } from "@/lib/context/LiveDataContext";
 
@@ -21,6 +22,7 @@ export default function Home() {
   const [globalStateFilter, setGlobalStateFilter] = useState<string>("ALL");
   const [globalConstituencyId, setGlobalConstituencyId] = useState<string | null>(null);
   const [activeSignal, setActiveSignal] = useState<any | null>(null);
+  const [activeClusterSignals, setActiveClusterSignals] = useState<any[] | null>(null);
   const [mobilePane, setMobilePane] = useState<"signals" | "map" | "intel" | "warroom">("map");
 
   // Map overlay toggles (clarifies what the tiles represent)
@@ -55,6 +57,8 @@ export default function Home() {
         onSelectConstituency={id => { setGlobalConstituencyId(id); if (window.innerWidth < 768) setMobilePane("intel"); }}
         onSelectState={handleStateFilter}
         onSelectSignal={setActiveSignal}
+        onSelectSignalCluster={setActiveClusterSignals}
+        mobilePane={mobilePane}
         resetTrigger={resetTrigger}
         onZoomChange={setMapZoom}
         overlayMode={mapOverlayMode}
@@ -111,6 +115,16 @@ export default function Home() {
       </div>
 
       <BottomBar />
+      {activeClusterSignals && activeClusterSignals.length > 0 && (
+        <SignalClusterModal
+          signals={activeClusterSignals}
+          onClose={() => setActiveClusterSignals(null)}
+          onPick={(s) => {
+            setActiveClusterSignals(null);
+            setActiveSignal(s);
+          }}
+        />
+      )}
       {activeSignal && <SignalModal signal={activeSignal} onClose={() => setActiveSignal(null)} />}
     </>
   );

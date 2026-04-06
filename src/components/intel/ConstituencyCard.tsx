@@ -61,7 +61,7 @@ export default function ConstituencyCard({ constituency }: ConstituencyCardProps
           </span>
         </div>
         <p className="font-mono text-[8px] text-[#a1a1aa] mb-2 leading-snug">
-          Composite 0–100 from the pipeline (contest pressure + risk signals). Not an opinion poll.
+          Mathematical 0–100 index: contest size (extra candidates), affidavit risk (criminal cases, capped), and recent OSINT severity on this seat—combined with fixed weights and clamped. Not a poll or vote model. Refreshed by <code className="text-[#71717a]">intel_ingestor</code>.
         </p>
         <VolatilityGauge score={constituency.volatility_score || 0} />
       </div>
