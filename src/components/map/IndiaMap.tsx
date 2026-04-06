@@ -266,12 +266,14 @@ export default function IndiaMap({
                     stroke = metaColor;
                     strokeWidth = 0.8 / zoomFactor;
                   }
-
                   let centroid: [number, number] | null = null;
-                  if (currentView === "India" && isTargetState) {
+                  if (currentView === "India") {
                     try {
                       const c = pathGenerator.centroid(geo);
-                      if (c && !isNaN(c[0]) && !isNaN(c[1])) centroid = projectionConfig.invert(c) as [number, number];
+                      // Add the strict checking to satisfy TypeScript
+                      if (c && !isNaN(c[0]) && !isNaN(c[1]) && projectionConfig.invert) {
+                        centroid = projectionConfig.invert(c) as [number, number];
+                      }
                     } catch (e) { }
                   }
 
