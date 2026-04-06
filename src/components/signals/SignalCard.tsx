@@ -5,6 +5,7 @@ import { relativeTime, severityLabel } from "@/lib/utils/formatting";
 
 interface SignalCardProps {
   signal: any;
+  tick?: number; // 🔥 FIX: Accept the tick to force re-evaluation of relativeTime
   onClick: () => void;
 }
 
@@ -16,7 +17,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   rumor: "#52525b",
 };
 
-export default function SignalCard({ signal, onClick }: SignalCardProps) {
+export default function SignalCard({ signal, tick, onClick }: SignalCardProps) {
   const categoryColor = CATEGORY_COLORS[signal.category || "breaking"] || "#52525b";
 
   return (
@@ -39,6 +40,7 @@ export default function SignalCard({ signal, onClick }: SignalCardProps) {
             SEV-{signal.severity} {severityLabel(signal.severity)}
           </span>
         </div>
+        {/* 🔥 FIX: This will now auto-update every 60 seconds because the parent ticks */}
         <span className="font-mono text-[9px] text-[#71717a]" suppressHydrationWarning>
           {relativeTime(new Date(signal.created_at || signal.createdAt))}
         </span>
@@ -55,7 +57,6 @@ export default function SignalCard({ signal, onClick }: SignalCardProps) {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="font-mono text-[9px] text-[#71717a]">SRC:</span>
-          {/* Prevent card click when clicking the direct source link */}
           <a
             href={signal.source_url || `https://news.google.com/search?q=${encodeURIComponent(signal.source + ' ' + signal.title)}`}
             target="_blank"

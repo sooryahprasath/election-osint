@@ -54,7 +54,7 @@ export const LiveDataProvider = ({ children }: { children: React.ReactNode }) =>
   useEffect(() => {
     let isMounted = true;
 
-    // 1. FAST PAYLOAD: Load Map, News, and HUD data instantly in parallel
+    // 1. FAST PAYLOAD: Load Map, News, and HUD data instantly
     const loadVanguardData = async () => {
       try {
         const [cwRes, sigRes, turnRes, exitRes, liveRes] = await Promise.all([
@@ -71,40 +71,64 @@ export const LiveDataProvider = ({ children }: { children: React.ReactNode }) =>
           if (turnRes.data) setTurnoutData(turnRes.data);
           if (exitRes.data) setExitPolls(exitRes.data);
           if (liveRes.data) setLiveResults(liveRes.data);
-          setIsConnected(true); // Unblocks the UI instantly
+          setIsConnected(true);
         }
       } catch (err) {
         console.error("[LiveDataContext] Fast Payload Failed", err);
       }
     };
 
-    // 2. HEAVY PAYLOAD: Load Candidates in the background without blocking the UI
+    // 2. HEAVY PAYLOAD: Load Candidates in the background
     const loadHeavyData = async () => {
       const cands = await fetchHeavyTable("candidates");
       if (isMounted && cands) setCandidates(cands);
     };
 
-    // Execute Sequence
     loadVanguardData().then(() => loadHeavyData());
 
-    // 3. REALTIME LISTENERS
+    // 3. REALTIME LISTENERS (Bulletproof Version)
     const channel = supabase.channel("schema-db-changes")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "signals" }, (p) => {
-        if (isMounted) setSignals((prev) => [p.new, ...prev]);
+      .on("postgres_changes", { event: "*", schema: "public", table: "signals" }, (payload) => {
+        if (!isMounted) return;
+
+        console.log("Realtime Signal:", payload.eventType, payload.new?.id); // Keep this for debugging
+
+        setSignals((prev) => {
+          if (payload.eventType === "INSERT") {
+            // 🔥 FIX: Just push it to the top. Do NOT sort here, let the UI handle sorting. 
+            // This prevents date-parsing errors from breaking the realtime feed.
+            return [payload.new, ...prev].slice(0, 500);
+          }
+          else if (payload.eventType === "UPDATE") {
+            return prev.map((sig) => (sig.id === payload.new.id ? payload.new : sig));
+          }
+          else if (payload.eventType === "DELETE") {
+            return prev.filter((sig) => sig.id !== payload.old.id);
+          }
+          return prev;
+        });
       })
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "candidates" }, (p) => {
-        if (isMounted) setCandidates((prev) => [...prev, p.new]);
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "candidates" }, (payload) => {
+        if (isMounted) setCandidates((prev) => [...prev, payload.new]);
       })
-      // Targeted Refetches for War Room Data
-      .on("postgres_changes", { event: "*", schema: "public", table: "voter_turnout" }, async () => {
-        const { data } = await supabase.from("voter_turnout").select("*");
-        if (isMounted && data) setTurnoutData(data);
+      .on("postgres_changes", { event: "*", schema: "public", table: "voter_turnout" }, (payload) => {
+        if (isMounted && payload.eventType === "UPDATE") {
+          setTurnoutData((prev) => prev.map((t) => (t.id === payload.new.id ? payload.new : t)));
+        }
       })
-      .on("postgres_changes", { event: "*", schema: "public", table: "live_results" }, async () => {
-        const { data } = await supabase.from("live_results").select("*");
-        if (isMounted && data) setLiveResults(data);
+      .on("postgres_changes", { event: "*", schema: "public", table: "live_results" }, (payload) => {
+        if (isMounted && payload.eventType === "UPDATE") {
+          setLiveResults((prev) => prev.map((lr) => (lr.id === payload.new.id ? payload.new : lr)));
+        }
       })
-      .subscribe();
+      .subscribe((status, err) => {
+        // 🔥 FIX: Added error logging so you know if Supabase disconnects
+        if (status === 'SUBSCRIBED') {
+          console.log('🟢 Supabase Realtime Connected');
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('🔴 Supabase Realtime Error:', err);
+        }
+      });
 
     return () => {
       isMounted = false;

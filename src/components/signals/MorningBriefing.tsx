@@ -2,41 +2,47 @@
 
 import { useEffect, useState } from "react";
 import { Sun, Moon, Loader2, ShieldAlert } from "lucide-react";
-import { createClient } from "@supabase/supabase-js";
-
-// Initialize Supabase locally for this component
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
-);
+// 🔥 FIX: Use the shared, single-instance Supabase client
+import { supabase } from "@/lib/supabase";
 
 export default function MorningBriefing() {
   const [briefing, setBriefing] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchBriefing = async () => {
-      // Fetch the most recently generated AI briefing
-      const { data, error } = await supabase
-        .from("briefings")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .single();
+    let isMounted = true;
 
-      if (data) setBriefing(data);
-      setLoading(false);
+    const fetchBriefing = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("briefings")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .single();
+
+        if (isMounted) {
+          if (data) setBriefing(data);
+          setLoading(false);
+        }
+      } catch (err) {
+        console.error("Failed to load briefing:", err);
+        if (isMounted) setLoading(false);
+      }
     };
 
     fetchBriefing();
 
-    // Optionally set up a realtime subscription if you want it to update live
+    // Set up a realtime subscription
     const channel = supabase.channel('briefing_updates')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'briefings' }, (payload) => {
-        setBriefing(payload.new);
+        if (isMounted) setBriefing(payload.new);
       }).subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      isMounted = false;
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const getIcon = (timeOfDay: string) => {

@@ -279,17 +279,13 @@ body {
   border-left: 3px solid var(--danger);
 }
 
-/* ── Cesium Overrides ─────────────────────────────── */
+@keyframes ticker {
+  0% {
+    transform: translateX(0);
+  }
 
-.cesium-viewer {
-  font-family: var(--font-jetbrains), 'JetBrains Mono', monospace !important;
-}
-
-.cesium-viewer .cesium-widget-credits,
-.cesium-viewer .cesium-viewer-toolbar,
-.cesium-viewer .cesium-viewer-animationContainer,
-.cesium-viewer .cesium-viewer-timelineContainer,
-.cesium-viewer .cesium-viewer-fullscreenContainer,
-.cesium-viewer .cesium-viewer-bottom {
-  display: none !important;
+  100% {
+    /* Instead of -50%, it translates exactly -100% of the first container's width */
+    transform: translateX(-50%);
+  }
 }
