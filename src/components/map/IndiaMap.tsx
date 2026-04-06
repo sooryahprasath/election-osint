@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import { ComposableMap, Geographies, Geography, Marker, ZoomableGroup } from "react-simple-maps";
 import { geoMercator, geoPath } from "d3-geo";
 import { useLiveData } from "@/lib/context/LiveDataContext";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Layers } from "lucide-react";
 import { STATE_META } from "@/lib/utils/states";
 
 const ELECTION_STATES = ["Kerala", "Assam", "Puducherry", "Tamil Nadu", "West Bengal"];
@@ -102,6 +102,8 @@ export default function IndiaMap({
   const [hoveredConst, setHoveredConst] = useState<string | null>(null);
   const [constituencyTip, setConstituencyTip] = useState<any | null>(null);
   const [mapShellOpacity, setMapShellOpacity] = useState(1);
+  const [mapLayersOpen, setMapLayersOpen] = useState(false);
+  const mapLayersWrapRef = useRef<HTMLDivElement>(null);
 
   const tooltipRef = useRef<HTMLDivElement>(null);
   const positionRef = useRef({ coordinates: getCenterCoords("India") as [number, number], zoom: 1 });
@@ -149,6 +151,16 @@ export default function IndiaMap({
     window.addEventListener("resize", checkMobile);
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
+
+  useEffect(() => {
+    if (!mapLayersOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const el = mapLayersWrapRef.current;
+      if (el && !el.contains(e.target as Node)) setMapLayersOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [mapLayersOpen]);
 
   useEffect(() => {
     if (activeState && activeState !== "ALL" && STATE_MAP_FILES[activeState]) {
@@ -390,72 +402,80 @@ export default function IndiaMap({
         backgroundSize: "24px 24px",
       }}
     >
-      {/* Overlay controls: clarify what is rendered on-map */}
-      <div className="absolute top-2 left-2 md:left-[292px] z-40 pointer-events-auto select-none">
-        <div className="bg-white/95 backdrop-blur-md border border-[#e4e4e7] rounded shadow-sm overflow-hidden">
-          <div className="px-2 py-1 border-b border-[#e4e4e7] bg-[#f4f4f5] font-mono text-[9px] font-bold text-[#52525b] tracking-wider">
-            MAP LAYERS
-          </div>
-          <div className="p-2 flex flex-col gap-1.5">
-            <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              title="Plot only items with a video URL (thumbnails). Position uses AI lat/long when present, else constituency spread."
-              onClick={() => onChangeOverlayMode && onChangeOverlayMode("VIDEOS")}
-              className={`px-2 py-1 rounded font-mono text-[9px] font-bold border transition-colors ${overlayMode === "VIDEOS" ? "bg-[#0284c7]/10 text-[#0284c7] border-[#0284c7]/30" : "bg-white text-[#71717a] border-[#e4e4e7] hover:bg-[#f4f4f5]"}`}
-            >
-              VIDEOS
-            </button>
-            <button
-              type="button"
-              title="News + alerts clustered on the map by location (signal lat/long, else linked constituency centroid)."
-              onClick={() => onChangeOverlayMode && onChangeOverlayMode("ALL")}
-              className={`px-2 py-1 rounded font-mono text-[9px] font-bold border transition-colors ${overlayMode === "ALL" ? "bg-[#16a34a]/10 text-[#16a34a] border-[#16a34a]/30" : "bg-white text-[#71717a] border-[#e4e4e7] hover:bg-[#f4f4f5]"}`}
-            >
-              ALL SIGNALS
-            </button>
-            <button
-              type="button"
-              onClick={() => onToggleVerifiedOnly && onToggleVerifiedOnly()}
-              className={`px-2 py-1 rounded font-mono text-[9px] font-bold border transition-colors ${verifiedOnly ? "bg-[#16a34a]/10 text-[#16a34a] border-[#16a34a]/30" : "bg-white text-[#71717a] border-[#e4e4e7] hover:bg-[#f4f4f5]"}`}
-              title="Filter map overlay to verified-only"
-            >
-              VERIFIED
-            </button>
+      {/* Map layers: FAB + sheet — keeps the map clear; mirrors legend inset from sidebars on md+ */}
+      <div
+        ref={mapLayersWrapRef}
+        className="absolute bottom-2 right-2 z-40 flex flex-col items-end gap-1.5 pointer-events-auto select-none md:bottom-3 md:right-[292px]"
+      >
+        {mapLayersOpen && (
+          <div
+            className="w-[min(17rem,calc(100vw-3.5rem))] rounded-lg border border-[#e4e4e7] bg-white/95 py-2 pl-2 pr-2 shadow-lg backdrop-blur-md"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="mb-1.5 font-mono text-[8px] font-bold tracking-wider text-[#71717a]">MAP LAYERS</div>
+            <div className="flex flex-col gap-1.5">
+              <div className="flex flex-wrap gap-1">
+                <button
+                  type="button"
+                  title="Video-linked signals as thumbnails (AI lat/long when present)."
+                  onClick={() => onChangeOverlayMode && onChangeOverlayMode("VIDEOS")}
+                  className={`rounded-md px-2 py-1.5 font-mono text-[8px] font-bold transition-colors ${overlayMode === "VIDEOS" ? "bg-sky-50 text-[#0284c7] ring-1 ring-sky-200" : "bg-[#fafafa] text-[#52525b] ring-1 ring-[#e4e4e7] hover:bg-[#f4f4f5]"}`}
+                >
+                  VIDEOS
+                </button>
+                <button
+                  type="button"
+                  title="All signals clustered by coordinates (or constituency centroid)."
+                  onClick={() => onChangeOverlayMode && onChangeOverlayMode("ALL")}
+                  className={`rounded-md px-2 py-1.5 font-mono text-[8px] font-bold transition-colors ${overlayMode === "ALL" ? "bg-emerald-50 text-[#16a34a] ring-1 ring-emerald-200" : "bg-[#fafafa] text-[#52525b] ring-1 ring-[#e4e4e7] hover:bg-[#f4f4f5]"}`}
+                >
+                  ALL SIGNALS
+                </button>
+                <button
+                  type="button"
+                  title="Verified sources only"
+                  onClick={() => onToggleVerifiedOnly && onToggleVerifiedOnly()}
+                  className={`rounded-md px-2 py-1.5 font-mono text-[8px] font-bold transition-colors ${verifiedOnly ? "bg-emerald-50 text-[#16a34a] ring-1 ring-emerald-200" : "bg-[#fafafa] text-[#52525b] ring-1 ring-[#e4e4e7] hover:bg-[#f4f4f5]"}`}
+                >
+                  VERIFIED
+                </button>
+              </div>
+              <p className="font-mono text-[7px] leading-snug text-[#a1a1aa]">
+                {overlayMode === "ALL"
+                  ? "Clusters every in-scope signal (precise when lat/long is ingested)."
+                  : "Thumbnails for video-linked signals only."}
+              </p>
             </div>
-            <p className="font-mono text-[8px] text-[#a1a1aa] leading-snug px-0.5 max-w-[220px] hidden sm:block">
-              {overlayMode === "ALL"
-                ? "ALL SIGNALS: every in-scope signal, clustered by coordinates (precise when lat/long is ingested)."
-                : "VIDEOS: thumbnail pins for video-linked signals only."}
-            </p>
           </div>
-        </div>
+        )}
+        <button
+          type="button"
+          aria-expanded={mapLayersOpen}
+          aria-label={mapLayersOpen ? "Close map layers" : "Map layers"}
+          onClick={(e) => {
+            e.stopPropagation();
+            setMapLayersOpen((o) => !o);
+          }}
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-[#e4e4e7] bg-white/95 text-[#52525b] shadow-md backdrop-blur-md transition-colors hover:border-sky-300 hover:text-[#0284c7] active:scale-95"
+        >
+          <Layers className="h-4 w-4" strokeWidth={2} />
+        </button>
       </div>
 
-      <div className="absolute bottom-[5.25rem] left-2 right-2 md:bottom-3 md:left-[292px] md:right-auto z-40 pointer-events-none select-none pb-[env(safe-area-inset-bottom,0px)] max-w-[min(100%,18rem)]">
-        <div className="bg-white/90 backdrop-blur-md border border-[#e4e4e7] rounded shadow-sm px-3 py-2">
-          <div className="font-mono text-[9px] font-bold text-[#52525b] tracking-wider mb-1">LEGEND</div>
+      {/* Legend: tucked to map bottom (footer already reserved via --map-footer-stack) */}
+      <div className="pointer-events-none absolute bottom-2 left-2 z-30 max-w-[9.5rem] select-none md:bottom-3 md:left-[292px] md:max-w-[13rem]">
+        <div className="rounded-md border border-[#e4e4e7]/80 bg-white/80 px-2 py-1 shadow-sm backdrop-blur-sm">
+          <div className="mb-0.5 font-mono text-[7px] font-bold tracking-wider text-[#71717a]">LEGEND</div>
           {operationMode === "VOTING_DAY" ? (
-            <div className="font-mono text-[9px] text-[#71717a]">
-              Dot color = turnout band (low→high).
-            </div>
+            <p className="font-mono text-[7px] leading-snug text-[#52525b] md:text-[8px]">Dots = turnout (low→high).</p>
           ) : operationMode === "COUNTING_DAY" ? (
-            <div className="font-mono text-[9px] text-[#71717a]">
-              Dot color = leading party (where available).
-            </div>
+            <p className="font-mono text-[7px] leading-snug text-[#52525b] md:text-[8px]">Dots = leading party.</p>
           ) : (
-            <div className="font-mono text-[9px] text-[#71717a]">
-              Dot color = volatility (green→orange→red).
-            </div>
+            <p className="font-mono text-[7px] leading-snug text-[#52525b] md:text-[8px]">Dots = volatility (G→O→R).</p>
           )}
-          <div className="font-mono text-[9px] text-[#a1a1aa] mt-1">
-            {overlayMode === "VIDEOS" ? "Tiles = signals with video." : "Circles = clustered signals (tap for top item)."}
-          </div>
-          <div className="font-mono text-[8px] text-[#a1a1aa] mt-1.5 pt-1 border-t border-zinc-100 md:hidden leading-snug">
-            {overlayMode === "ALL"
-              ? "ALL SIGNALS = every signal clustered on the map (uses lat/long when ingested)."
-              : "VIDEOS = video-linked pins only."}
-          </div>
+          <p className="mt-0.5 font-mono text-[7px] leading-snug text-[#a1a1aa] md:text-[8px]">
+            {overlayMode === "VIDEOS" ? "Tiles = video signals." : "Rings = signal clusters."}
+          </p>
         </div>
       </div>
 

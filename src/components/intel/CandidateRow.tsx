@@ -23,36 +23,42 @@ export default function CandidateRow({ candidate, onClick, isLeading }: Candidat
       onClick={onClick}
       className={`px-3 py-2.5 border-b border-[#e4e4e7] transition-colors ${onClick ? 'cursor-pointer hover:bg-[#e4e4e7]/50' : 'hover:bg-[#f4f4f5]'}`}
     >
-      {/* Name + Party */}
-      <div className="flex items-center gap-2 mb-1.5">
-        {/* Party color dot */}
-        <div
-          className="h-2.5 w-2.5 rounded-full shrink-0"
-          style={{ backgroundColor: partyColor }}
-        />
-        <span className="font-mono text-[11px] text-[#18181b] font-medium truncate">
-          {candidate.name}
-        </span>
-        <span
-          className="font-mono text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0"
-          style={{
-            color: partyColor,
-            backgroundColor: `${partyColor}15`,
-            border: `1px solid ${partyColor}30`,
-          }}
-        >
-          {candidate.party}
-        </span>
-        {candidate.removed && (
-          <span className="font-mono text-[8px] font-bold text-[#a1a1aa] bg-[#f4f4f5] border border-[#e4e4e7] px-1 py-0.5 rounded shrink-0">
-            REMOVED
+      {/* Phone: single row. md+ fixed intel column (~280px): party on its own row so labels are never clipped. */}
+      <div className="mb-1.5 flex flex-row flex-wrap items-center gap-x-2 gap-y-1 md:flex-col md:items-stretch md:gap-1">
+        <div className="flex min-w-0 flex-1 items-center gap-2 md:w-full md:flex-none">
+          <div className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: partyColor }} />
+          <span className="min-w-0 flex-1 truncate font-mono text-[11px] font-medium text-[#18181b]">
+            {candidate.name}
           </span>
-        )}
-        {isLeading && (
-          <span className="font-mono text-[8px] text-[#22c55e] bg-[#22c55e]/10 px-1 py-0.5 rounded shrink-0">
-            LEADING
+          <span
+            className="shrink-0 rounded px-1.5 py-0.5 font-mono text-[9px] font-bold md:hidden"
+            style={{
+              color: partyColor,
+              backgroundColor: `${partyColor}15`,
+              border: `1px solid ${partyColor}30`,
+            }}
+          >
+            {candidate.party}
           </span>
-        )}
+        </div>
+        <div className="flex w-full flex-wrap items-center gap-1.5 md:pl-[14px]">
+          <span
+            className="hidden max-w-full break-words rounded border border-[#e4e4e7] bg-[#fafafa] px-1.5 py-0.5 font-mono text-[9px] font-bold leading-tight text-[#27272a] md:inline-block"
+            style={{ borderLeftWidth: 3, borderLeftColor: partyColor }}
+          >
+            {candidate.party}
+          </span>
+          {candidate.removed && (
+            <span className="shrink-0 rounded border border-[#e4e4e7] bg-[#f4f4f5] px-1 py-0.5 font-mono text-[8px] font-bold text-[#a1a1aa]">
+              REMOVED
+            </span>
+          )}
+          {isLeading && (
+            <span className="shrink-0 rounded bg-[#22c55e]/10 px-1 py-0.5 font-mono text-[8px] text-[#22c55e]">
+              LEADING
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Stats row */}

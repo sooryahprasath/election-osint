@@ -2,6 +2,13 @@
 
 import { useState } from "react";
 import { Wifi, MapPin, Users, Signal, Settings2, X, Clock, ShieldAlert } from "lucide-react";
+
+const GithubIcon = ({ className }: { className?: string }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.24c3-.34 6-1.5 6-6.6a5.5 5.5 0 0 0-1.5-3.8 5.4 5.4 0 0 0-.15-3.8s-1.18-.38-3.9 1.4a13.4 13.4 0 0 0-7 0c-2.72-1.78-3.9-1.4-3.9-1.4a5.4 5.4 0 0 0-.15 3.8 5.5 5.5 0 0 0-1.5 3.8c0 5.1 3 6.26 6 6.6a4.8 4.8 0 0 0-1 3.24v4" />
+    <path d="M9 18c-4.51 2-5-2-7-2" />
+  </svg>
+);
 import { useLiveData } from "@/lib/context/LiveDataContext";
 import { ELECTION_DATES } from "@/lib/utils/countdown";
 
@@ -40,17 +47,30 @@ export default function BottomBar() {
           <div className="flex items-center gap-1"><Users className="h-3 w-3 text-[#16a34a]" /><span className="text-[#52525b]">CANDIDATES: <span className="text-[#16a34a]">{candidates.length}</span></span></div>
         </div>
 
-        <div className="flex items-center gap-2 text-[#71717a]">
+        <div className="flex items-center gap-3 text-[#71717a]">
           <span className="hidden md:inline">SRC: ECI / ADR / MyNeta</span>
           <span className="hidden md:inline text-[#e4e4e7]">|</span>
 
+          <a
+            href="https://github.com/sooryahprasath/election-osint"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex shrink-0 items-center text-[#71717a] transition-colors hover:text-[#18181b]"
+            title="View source on GitHub"
+          >
+            <GithubIcon className="h-3.5 w-3.5" />
+          </a>
+
           {ENABLE_DEV_MENU ? (
-            <button onClick={() => setShowDevMenu(!showDevMenu)} className="hover:text-[#16a34a] transition-colors flex items-center gap-1">
-              v0.1.0-alpha <Settings2 className="h-3 w-3" />
+            <button
+              type="button"
+              aria-label="Developer menu"
+              onClick={() => setShowDevMenu(!showDevMenu)}
+              className="flex items-center text-[#71717a] transition-colors hover:text-[#16a34a]"
+            >
+              <Settings2 className="h-3 w-3" />
             </button>
-          ) : (
-            <span>v0.1.0-alpha</span>
-          )}
+          ) : null}
         </div>
       </footer>
 

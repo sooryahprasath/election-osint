@@ -106,30 +106,32 @@ export default function VotingHud({ isMobileOpen, onCloseMobile }: { isMobileOpe
   return (
     <div
       ref={rootRef}
-      className={`fixed z-30 flex flex-col transition-[transform,max-height] duration-300 ease-out bg-white/95 backdrop-blur-md border-[#e4e4e7] overflow-hidden
-          md:top-auto md:bottom-[28px] md:left-[280px] md:right-[280px] md:max-h-[min(42vh,340px)] md:rounded-t-lg md:rounded-b-none md:border md:border-b-0 md:shadow-[0_-10px_40px_rgba(0,0,0,0.1)] md:translate-y-0
-          top-auto bottom-[76px] left-0 right-0 max-h-[min(50vh,520px)] rounded-t-lg border-t shadow-[0_-8px_32px_rgba(0,0,0,0.12)]
+      className={`fixed z-30 flex flex-col overflow-hidden border-[#e4e4e7] bg-white/98 backdrop-blur-md transition-[transform,max-height] duration-300 ease-out
+          md:top-auto md:bottom-[28px] md:left-[280px] md:right-[280px] md:max-h-[min(40vh,320px)] md:rounded-t-xl md:rounded-b-none md:border md:border-b-0 md:shadow-[0_-4px_24px_rgba(15,23,42,0.06)]
+          top-auto bottom-[76px] left-0 right-0 max-h-[min(48vh,480px)] rounded-t-2xl border-t border-x border-[#e4e4e7] shadow-[0_-4px_24px_rgba(15,23,42,0.08)]
           ${isMobileOpen ? "translate-y-0" : "translate-y-[calc(100%+12px)] md:translate-y-0"}
           ${isDesktopCollapsed ? "md:!max-h-[36px] md:min-h-0" : ""}`}
     >
       <div
-        className="flex items-center justify-between px-4 py-1.5 bg-[#f4f4f5] border-b border-[#e4e4e7] cursor-pointer"
+        className="flex cursor-pointer items-center justify-between border-b border-[#e4e4e7] bg-white px-3 py-2 md:px-4"
         onClick={() => {
           if (window.innerWidth >= 768) setIsDesktopCollapsed(!isDesktopCollapsed);
         }}
       >
-        <div className="flex items-center gap-4 min-w-0">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
           {isVoting && (
-            <>
+            <div className="flex flex-1 rounded-lg bg-[#f4f4f5] p-0.5 md:inline-flex md:max-w-md">
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   setActiveTab("TURNOUT");
                 }}
-                className={`font-mono text-[10px] font-bold tracking-widest flex items-center gap-1 shrink-0 ${activeTab === "TURNOUT" ? "text-[#0284c7]" : "text-[#a1a1aa] hover:text-[#52525b]"}`}
+                className={`flex flex-1 items-center justify-center gap-1 rounded-md px-2 py-1 font-mono text-[9px] font-bold tracking-wide transition-colors md:flex-initial md:px-3 ${
+                  activeTab === "TURNOUT" ? "bg-white text-[#0284c7] shadow-sm" : "text-[#71717a] hover:text-[#52525b]"
+                }`}
               >
-                <Activity className="h-3.5 w-3.5" /> LIVE TURNOUT
+                <Activity className="h-3 w-3 shrink-0" /> LIVE TURNOUT
               </button>
               <button
                 type="button"
@@ -137,11 +139,13 @@ export default function VotingHud({ isMobileOpen, onCloseMobile }: { isMobileOpe
                   e.stopPropagation();
                   setActiveTab("EXIT_POLLS");
                 }}
-                className={`font-mono text-[10px] font-bold tracking-widest flex items-center gap-1 shrink-0 ${activeTab === "EXIT_POLLS" ? "text-[#ea580c]" : "text-[#a1a1aa] hover:text-[#52525b]"}`}
+                className={`flex flex-1 items-center justify-center gap-1 rounded-md px-2 py-1 font-mono text-[9px] font-bold tracking-wide transition-colors md:flex-initial md:px-3 ${
+                  activeTab === "EXIT_POLLS" ? "bg-white text-[#ea580c] shadow-sm" : "text-[#71717a] hover:text-[#52525b]"
+                }`}
               >
-                <BarChart3 className="h-3.5 w-3.5" /> EXIT POLLS
+                <BarChart3 className="h-3 w-3 shrink-0" /> EXIT POLLS
               </button>
-            </>
+            </div>
           )}
           {isCounting && (
             <div className="font-mono text-[11px] font-bold tracking-widest text-[#dc2626] flex items-center gap-2">
@@ -150,11 +154,11 @@ export default function VotingHud({ isMobileOpen, onCloseMobile }: { isMobileOpe
           )}
         </div>
 
-        <div className="hidden md:flex items-center gap-2 shrink-0">
-          <span className="font-mono text-[9px] text-[#71717a]">
-            <Clock className="inline w-3 h-3 mb-0.5" /> IST SYNC
+        <div className="hidden shrink-0 items-center gap-2 md:flex">
+          <span className="font-mono text-[8px] text-[#a1a1aa]">
+            <Clock className="mb-0.5 inline h-3 w-3" /> IST
           </span>
-          {isDesktopCollapsed ? <ChevronDown className="h-4 w-4 text-[#71717a]" /> : <ChevronUp className="h-4 w-4 text-[#71717a]" />}
+          {isDesktopCollapsed ? <ChevronDown className="h-4 w-4 text-[#a1a1aa]" /> : <ChevronUp className="h-4 w-4 text-[#a1a1aa]" />}
         </div>
 
         <div className="md:hidden flex items-center" onClick={(e) => { e.stopPropagation(); onCloseMobile?.(); }}>
@@ -163,20 +167,20 @@ export default function VotingHud({ isMobileOpen, onCloseMobile }: { isMobileOpe
       </div>
 
       {!isDesktopCollapsed && (
-        <div className="p-4 flex-1 min-h-0 overflow-y-auto pb-6 md:pb-4">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3 pb-6 md:p-4 md:pb-4">
           {isVoting && phaseBanner && activeTab === "TURNOUT" && (
             <div
-              className={`mb-3 flex gap-2 rounded border px-3 py-2 font-mono text-[9px] leading-snug ${
+              className={`mb-3 flex gap-2 rounded-md border px-2.5 py-1.5 font-mono text-[8px] leading-relaxed md:text-[9px] ${
                 phaseBanner.tone === "blue"
-                  ? "border-[#bae6fd] bg-[#f0f9ff] text-[#0369a1]"
+                  ? "border-sky-100 bg-sky-50/80 text-sky-900"
                   : phaseBanner.tone === "amber"
-                    ? "border-[#fde68a] bg-[#fffbeb] text-[#b45309]"
+                    ? "border-amber-100 bg-amber-50/80 text-amber-900"
                     : phaseBanner.tone === "orange"
-                      ? "border-[#fed7aa] bg-[#fff7ed] text-[#c2410c]"
+                      ? "border-orange-100 bg-orange-50/80 text-orange-900"
                       : "border-[#e4e4e7] bg-[#fafafa] text-[#52525b]"
               }`}
             >
-              <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <Info className="mt-0.5 h-3 w-3 shrink-0 text-current opacity-70" />
               <span>{phaseBanner.text}</span>
             </div>
           )}
@@ -194,9 +198,9 @@ export default function VotingHud({ isMobileOpen, onCloseMobile }: { isMobileOpe
                   : null;
 
                 return (
-                  <div key={state} className="bg-gradient-to-b from-[#f8fafc] to-white border border-[#e4e4e7] p-3 rounded-lg flex flex-col shadow-sm">
-                    <div className="flex justify-between items-start mb-2 gap-2">
-                      <span className="font-mono text-[11px] font-bold text-[#52525b]">{state.toUpperCase()}</span>
+                  <div key={state} className="flex flex-col rounded-xl border border-[#e4e4e7] bg-white p-3 shadow-sm">
+                    <div className="mb-2 flex items-start justify-between gap-2">
+                      <span className="font-mono text-[10px] font-bold tracking-wide text-[#27272a]">{state.toUpperCase()}</span>
                       <div className="text-right">
                         <span className="font-mono text-[9px] text-[#0284c7] font-bold bg-[#0284c7]/10 px-2 py-0.5 rounded block">
                           {stateData?.time_slot || "AWAITING SYNC"}

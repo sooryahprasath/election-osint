@@ -5,11 +5,13 @@ import { Radio, Shield, Activity, Clock, AlertTriangle, CheckCircle } from "luci
 import { getNextElectionEvent, formatCountdown, formatTime } from "@/lib/utils/countdown";
 import { useLiveData } from "@/lib/context/LiveDataContext";
 
-// --- Inline SVG for GitHub ---
-const GithubIcon = ({ className }: { className?: string }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.24c3-.34 6-1.5 6-6.6a5.5 5.5 0 0 0-1.5-3.8 5.4 5.4 0 0 0-.15-3.8s-1.18-.38-3.9 1.4a13.4 13.4 0 0 0-7 0c-2.72-1.78-3.9-1.4-3.9-1.4a5.4 5.4 0 0 0-.15 3.8 5.5 5.5 0 0 0-1.5 3.8c0 5.1 3 6.26 6 6.6a4.8 4.8 0 0 0-1 3.24v4" />
-    <path d="M9 18c-4.51 2-5-2-7-2" />
+/** Tiranga — compact for header (matches prior GitHub icon footprint). */
+const IndiaFlagIcon = ({ className }: { className?: string }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 6" className={className} aria-hidden="true">
+    <rect width="9" height="2" fill="#FF9933" />
+    <rect y="2" width="9" height="2" fill="#FFFFFF" />
+    <rect y="4" width="9" height="2" fill="#138808" />
+    <circle cx="4.5" cy="3" r="0.55" fill="none" stroke="#000080" strokeWidth="0.12" />
   </svg>
 );
 
@@ -151,15 +153,9 @@ export default function TopBar() {
 
         <div className="h-4 w-px bg-[#e4e4e7] ml-2 md:ml-3 mr-2 md:mr-3 shrink-0" />
 
-        <a
-          href="https://github.com/sooryahprasath/election-osint"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center shrink-0 text-[#71717a] hover:text-[#18181b] transition-colors"
-          title="View source on GitHub"
-        >
-          <GithubIcon className="h-3.5 w-3.5" />
-        </a>
+
+          <IndiaFlagIcon className="h-3.5 w-[21px]" />
+ 
       </header>
     </>
   );
