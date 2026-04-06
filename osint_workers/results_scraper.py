@@ -7,9 +7,8 @@ from supabase import create_client, Client
 
 load_dotenv(dotenv_path="../.env")
 
-# Use real Supabase credentials from .env
 SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL")
-SUPABASE_KEY = os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
 
 try:
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -36,9 +35,9 @@ def scrape_eci_results():
     # soup = BeautifulSoup(requests.get('https://results.eci.gov.in...').text)
     # tr = soup.find(...)
     
-    # Let's say we scraped Kannur (KER-13) and a candidate's margin shifted
+    # Let's say we scraped Kannur (KER-001) and a candidate's margin shifted
     mock_scraped_data = {
-        "candidate_id": "KER-13-1", # Example candidate ID
+        "candidate_id": "KER-001-1", # Example candidate ID
         "new_margin": random.randint(100, 50000),
         "status": "leading"
     }

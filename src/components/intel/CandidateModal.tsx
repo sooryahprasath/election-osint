@@ -96,6 +96,11 @@ export default function CandidateModal({ candidate, onClose }: { candidate: any;
                 <span className="h-3 w-3 rounded-full shadow-sm" style={{ backgroundColor: partyColor }} />
                 <span className="font-mono text-sm font-semibold text-[#52525b]">{partyName.toUpperCase()}</span>
                 {candidate.is_independent && <span className="ml-2 font-mono text-[10px] font-bold text-[#52525b] bg-[#e4e4e7] px-1.5 py-0.5 rounded border border-[#d4d4d8]">INDEPENDENT</span>}
+                {candidate.removed && (
+                  <span className="ml-2 font-mono text-[10px] font-bold text-[#a1a1aa] bg-[#f4f4f5] px-1.5 py-0.5 rounded border border-[#e4e4e7]">
+                    REMOVED FROM LATEST ECI LIST
+                  </span>
+                )}
               </div>
             </div>
 
@@ -125,7 +130,7 @@ export default function CandidateModal({ candidate, onClose }: { candidate: any;
                   <h3 className="font-mono text-[10px] font-bold text-[#52525b] mb-2 tracking-wider flex items-center gap-1.5"><MapPin className="h-3 w-3" /> CONTESTING CONSTITUENCY</h3>
                   <div className="text-xs text-[#27272a] space-y-1">
                     <p><span className="text-[#71717a]">ID:</span> {(candidate.constituency_id || "").toUpperCase()}</p>
-                    <p><span className="text-[#71717a]">Status:</span> ECI Verified & Accepted</p>
+                    <p><span className="text-[#71717a]">Status:</span> {candidate.removed ? "REMOVED / WITHDRAWN" : "ECI Verified & Accepted"}</p>
                   </div>
                 </div>
 

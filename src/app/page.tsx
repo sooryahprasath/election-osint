@@ -23,6 +23,10 @@ export default function Home() {
   const [activeSignal, setActiveSignal] = useState<any | null>(null);
   const [mobilePane, setMobilePane] = useState<"signals" | "map" | "intel" | "warroom">("map");
 
+  // Map overlay toggles (clarifies what the tiles represent)
+  const [mapOverlayMode, setMapOverlayMode] = useState<"VIDEOS" | "ALL">("VIDEOS");
+  const [mapVerifiedOnly, setMapVerifiedOnly] = useState(false);
+
   // FIX: Added state to track map zoom level for the reset button
   const [mapZoom, setMapZoom] = useState(1);
   const [resetTrigger, setResetTrigger] = useState(0);
@@ -53,6 +57,10 @@ export default function Home() {
         onSelectSignal={setActiveSignal}
         resetTrigger={resetTrigger}
         onZoomChange={setMapZoom}
+        overlayMode={mapOverlayMode}
+        verifiedOnly={mapVerifiedOnly}
+        onChangeOverlayMode={setMapOverlayMode}
+        onToggleVerifiedOnly={() => setMapVerifiedOnly(v => !v)}
       />
 
       <TopBar />
@@ -71,7 +79,12 @@ export default function Home() {
       {/* DESKTOP & MOBILE FLOATING RESET BUTTON */}
       {/* FIX: Button appears if a state is selected, a constituency is selected, OR if the user manually zoomed the map in! */}
       {(globalStateFilter !== "ALL" || globalConstituencyId || mapZoom > 1.5) && mobilePane === "map" && (
-        <div className="fixed bottom-[90px] md:bottom-[48px] left-1/2 transform -translate-x-1/2 z-30 animate-fade-in-up">
+        <div
+          className="fixed left-1/2 z-30 -translate-x-1/2 animate-fade-in-up"
+          style={{
+            bottom: "calc(var(--map-footer-stack, 28px) + 12px + var(--war-hud-reserve, 0px))",
+          }}
+        >
           <button
             onClick={handleResetZoom}
             className="bg-white/95 backdrop-blur-md shadow-[0_4px_15px_rgba(0,0,0,0.1)] border border-[#0284c7] px-5 py-2.5 rounded-full font-mono text-[11px] font-bold text-[#0284c7] flex items-center gap-2 transition-all hover:bg-[#0284c7] hover:text-white active:scale-95"

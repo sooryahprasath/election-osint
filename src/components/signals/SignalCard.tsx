@@ -19,6 +19,8 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 export default function SignalCard({ signal, tick, onClick }: SignalCardProps) {
   const categoryColor = CATEGORY_COLORS[signal.category || "breaking"] || "#52525b";
+  const isNational = !signal.state;
+  const isSev4 = (signal.severity || 1) >= 4;
 
   return (
     <article
@@ -49,6 +51,31 @@ export default function SignalCard({ signal, tick, onClick }: SignalCardProps) {
       <h3 className="text-[11px] font-semibold text-[#18181b] leading-tight mb-1 group-hover:text-[#0284c7] transition-colors">
         {signal.title}
       </h3>
+
+      <div className="flex flex-wrap gap-1.5 mb-1.5">
+        {signal.verified ? (
+          <span className="font-mono text-[8px] font-bold text-[#16a34a] bg-[#16a34a]/10 border border-[#16a34a]/25 px-1.5 py-0.5 rounded">
+            VERIFIED
+          </span>
+        ) : (
+          <span className="font-mono text-[8px] font-bold text-[#ea580c] bg-[#ea580c]/10 border border-[#ea580c]/25 px-1.5 py-0.5 rounded">
+            UNVERIFIED
+          </span>
+        )}
+        {signal.video_url && (
+          <span className="font-mono text-[8px] font-bold text-[#0284c7] bg-[#0284c7]/10 border border-[#0284c7]/25 px-1.5 py-0.5 rounded">
+            VIDEO
+          </span>
+        )}
+        <span className="font-mono text-[8px] font-bold text-[#52525b] bg-[#f4f4f5] border border-[#e4e4e7] px-1.5 py-0.5 rounded">
+          {isNational ? "NATIONAL" : "LOCAL"}
+        </span>
+        {isSev4 && (
+          <span className="font-mono text-[8px] font-bold text-[#dc2626] bg-[#dc2626]/10 border border-[#dc2626]/25 px-1.5 py-0.5 rounded">
+            SEV-4+
+          </span>
+        )}
+      </div>
 
       <p className="text-[10px] text-[#52525b] leading-relaxed line-clamp-2 mb-1.5">
         {signal.body}

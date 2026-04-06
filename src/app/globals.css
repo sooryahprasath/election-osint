@@ -6,6 +6,9 @@
    ═══════════════════════════════════════════════════ */
 
 :root {
+  /* Map stacks under TopBar (36px); footer: BottomBar 28px desktop, 48px nav + 28px bar on mobile */
+  --war-hud-reserve: 0px;
+  --map-footer-stack: 28px;
   --background: #f4f4f5;
   --foreground: #c0c0c0;
   --neon: #16a34a;
@@ -67,6 +70,12 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-inter), 'Inter', system-ui, sans-serif;
+}
+
+@media (max-width: 767px) {
+  :root {
+    --map-footer-stack: 76px;
+  }
 }
 
 /* ── Scrollbar ────────────────────────────────────── */

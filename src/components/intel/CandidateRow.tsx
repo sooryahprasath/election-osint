@@ -43,6 +43,11 @@ export default function CandidateRow({ candidate, onClick, isLeading }: Candidat
         >
           {candidate.party}
         </span>
+        {candidate.removed && (
+          <span className="font-mono text-[8px] font-bold text-[#a1a1aa] bg-[#f4f4f5] border border-[#e4e4e7] px-1 py-0.5 rounded shrink-0">
+            REMOVED
+          </span>
+        )}
         {isLeading && (
           <span className="font-mono text-[8px] text-[#22c55e] bg-[#22c55e]/10 px-1 py-0.5 rounded shrink-0">
             LEADING

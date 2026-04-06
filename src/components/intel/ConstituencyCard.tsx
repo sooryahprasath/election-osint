@@ -49,7 +49,7 @@ export default function ConstituencyCard({ constituency }: ConstituencyCardProps
 
       {/* Volatility Gauge */}
       <div className="px-3 py-3 border-b border-[#e4e4e7]">
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-1">
           <span className="font-mono text-[10px] text-[#52525b] tracking-wider">
             VOLATILITY INDEX
           </span>
@@ -60,6 +60,9 @@ export default function ConstituencyCard({ constituency }: ConstituencyCardProps
             {(constituency.volatility_score || 0).toFixed(1)}%
           </span>
         </div>
+        <p className="font-mono text-[8px] text-[#a1a1aa] mb-2 leading-snug">
+          Composite 0–100 from the pipeline (contest pressure + risk signals). Not an opinion poll.
+        </p>
         <VolatilityGauge score={constituency.volatility_score || 0} />
       </div>
 

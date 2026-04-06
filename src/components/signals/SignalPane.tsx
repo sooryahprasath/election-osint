@@ -1,14 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Radio, ChevronDown, ChevronUp } from "lucide-react";
+import { useMemo, useState, useEffect } from "react";
+import { Radio, ChevronDown, ChevronUp, Video } from "lucide-react";
 import SignalCard from "./SignalCard";
 import MorningBriefing from "./MorningBriefing";
 import { useLiveData } from "@/lib/context/LiveDataContext";
 import { STATE_META } from "@/lib/utils/states";
 
 export default function SignalPane({ globalStateFilter, setGlobalStateFilter, globalConstituencyId, onSelectSignal }: any) {
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({ briefing: false, signals: false });
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({ videos: false, briefing: false, signals: false });
   // 🔥 FIX: The 'Tick' state forces the UI to re-render every minute so '7m ago' becomes '8m ago'
   const [tick, setTick] = useState(0);
   const { signals, constituencies } = useLiveData();
@@ -26,10 +26,43 @@ export default function SignalPane({ globalStateFilter, setGlobalStateFilter, gl
   const activeConst = constituencies.find((c: any) => c.id === globalConstituencyId);
   const effectiveState = activeConst ? activeConst.state : globalStateFilter;
 
-  const filteredSignals = signals.filter((s: any) => {
-    if (effectiveState !== "ALL") return s.state === effectiveState;
-    return true;
-  }).sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  const getYouTubeThumbnail = (videoUrl?: string) => {
+    if (!videoUrl) return "";
+    // Supports embed URLs like https://www.youtube.com/embed/<id>?...
+    const embedMatch = videoUrl.match(/embed\/([^?]+)/);
+    if (embedMatch?.[1]) return `https://img.youtube.com/vi/${embedMatch[1]}/hqdefault.jpg`;
+    // Fallback: try v= query param
+    const vMatch = videoUrl.match(/[?&]v=([^&]+)/);
+    if (vMatch?.[1]) return `https://img.youtube.com/vi/${vMatch[1]}/hqdefault.jpg`;
+    return "";
+  };
+
+  const videoSignals = useMemo(() => {
+    const filtered = signals.filter((s: any) => {
+      if (!s.video_url) return false;
+      if (effectiveState !== "ALL") return s.state === effectiveState;
+      return true;
+    });
+    filtered.sort((a: any, b: any) => {
+      const at = Date.parse(a.created_at || "") || 0;
+      const bt = Date.parse(b.created_at || "") || 0;
+      return bt - at;
+    });
+    return filtered.slice(0, 12);
+  }, [signals, effectiveState]);
+
+  const filteredSignals = useMemo(() => {
+    const filtered = signals.filter((s: any) => {
+      if (effectiveState !== "ALL") return s.state === effectiveState;
+      return true;
+    });
+    filtered.sort((a: any, b: any) => {
+      const at = Date.parse(a.created_at || "") || 0;
+      const bt = Date.parse(b.created_at || "") || 0;
+      return bt - at;
+    });
+    return filtered;
+  }, [signals, effectiveState]);
 
   return (
     <aside className="flex flex-col h-full w-full overflow-hidden bg-[#ffffff] border-r border-[#e4e4e7]">
@@ -68,6 +101,63 @@ export default function SignalPane({ globalStateFilter, setGlobalStateFilter, gl
       </div>
 
       <div className="flex-1 overflow-y-auto">
+        {/* Video Intel Strip */}
+        <div className="border-b border-[#e4e4e7]">
+          <button
+            onClick={() => setCollapsed({ ...collapsed, videos: !collapsed.videos })}
+            className="flex items-center justify-between w-full px-3 py-1.5 hover:bg-[#f4f4f5]"
+          >
+            <span className="font-mono text-[10px] text-[#52525b] tracking-wider flex items-center gap-1.5">
+              <Video className="h-3 w-3" /> ◆ VIDEO INTEL
+            </span>
+            {collapsed.videos ? <ChevronDown className="h-3 w-3 text-[#71717a]" /> : <ChevronUp className="h-3 w-3 text-[#71717a]" />}
+          </button>
+          {!collapsed.videos && (
+            <div className="px-3 pb-3">
+              {videoSignals.length > 0 ? (
+                <div className="flex gap-2 overflow-x-auto py-1 pr-1">
+                  {videoSignals.map((s: any) => {
+                    const thumb = getYouTubeThumbnail(s.video_url);
+                    return (
+                      <button
+                        key={s.id}
+                        onClick={() => onSelectSignal(s)}
+                        className="shrink-0 w-[148px] rounded border border-[#e4e4e7] bg-white hover:bg-[#f4f4f5] transition-colors overflow-hidden text-left"
+                        title={s.title}
+                      >
+                        <div className="w-full aspect-video bg-[#0f172a] relative">
+                          {thumb ? (
+                            <img src={thumb} alt="" className="w-full h-full object-cover opacity-90" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-[#a1a1aa] font-mono text-[9px]">
+                              NO THUMB
+                            </div>
+                          )}
+                          <div className="absolute bottom-1 left-1 font-mono text-[8px] font-bold bg-black/60 text-white px-1.5 py-0.5 rounded">
+                            SEV-{s.severity || 1}
+                          </div>
+                        </div>
+                        <div className="p-2">
+                          <div className="font-mono text-[9px] font-bold text-[#52525b] truncate">
+                            {(s.state || "INDIA").toUpperCase()}
+                          </div>
+                          <div className="text-[10px] text-[#18181b] leading-tight line-clamp-2">
+                            {s.title}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="p-3 text-center font-mono text-[10px] text-[#a1a1aa]">
+                  No video intel available for this sector yet.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         <div className="border-b border-[#e4e4e7]">
           <button onClick={() => setCollapsed({ ...collapsed, briefing: !collapsed.briefing })} className="flex items-center justify-between w-full px-3 py-1.5 hover:bg-[#f4f4f5]">
             <span className="font-mono text-[10px] text-[#52525b] tracking-wider">◆ AI BRIEFING</span>

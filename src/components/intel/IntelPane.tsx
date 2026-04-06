@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Search, Filter, ChevronRight, AlertTriangle, HelpCircle } from "lucide-react";
+import { Search, Filter, ChevronRight, AlertTriangle, HelpCircle, Activity } from "lucide-react";
 import { useLiveData } from "@/lib/context/LiveDataContext";
 import ConstituencyCard from "./ConstituencyCard";
 import StateOverview from "./StateOverview";
@@ -14,13 +14,54 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
   const [searchQuery, setSearchQuery] = useState("");
   const [partyFilter, setPartyFilter] = useState("ALL");
   const [sortMode, setSortMode] = useState<SortMode>("VOLATILITY");
-  const { constituencies, candidates } = useLiveData();
+  const { constituencies, candidates, signals } = useLiveData();
 
   const activeState = globalStateFilter;
   const SHOW_PENDING_BANNER = process.env.NEXT_PUBLIC_SHOW_PENDING_BANNER !== "false";
   const isPendingState = SHOW_PENDING_BANNER && (activeState === "Tamil Nadu" || activeState === "West Bengal" || activeState === "ALL");
 
   const stateConstituencies = activeState === "ALL" ? constituencies : constituencies.filter((c: any) => c.state === activeState);
+
+  const hotspots = useMemo(() => {
+    // "Volatility delta" proxy: compare last 6h signal severity sum vs previous 6h
+    const now = Date.now();
+    const h6 = 6 * 60 * 60 * 1000;
+    const recentFrom = now - h6;
+    const prevFrom = now - 2 * h6;
+
+    const constById = new Map<string, any>();
+    for (const c of constituencies) constById.set(String(c.id), c);
+
+    const allowedConstIds = new Set(stateConstituencies.map((c: any) => String(c.id)));
+
+    const scoreRecent = new Map<string, number>();
+    const scorePrev = new Map<string, number>();
+
+    for (const s of signals as any[]) {
+      const cid = s.constituency_id ? String(s.constituency_id) : "";
+      if (!cid || !allowedConstIds.has(cid)) continue;
+      const ts = Date.parse(s.created_at || "") || 0;
+      if (!ts) continue;
+      const sev = Number(s.severity || 1);
+      if (ts >= recentFrom && ts <= now) {
+        scoreRecent.set(cid, (scoreRecent.get(cid) || 0) + sev);
+      } else if (ts >= prevFrom && ts < recentFrom) {
+        scorePrev.set(cid, (scorePrev.get(cid) || 0) + sev);
+      }
+    }
+
+    const rows: { id: string; name: string; delta: number; recent: number }[] = [];
+    for (const cid of allowedConstIds) {
+      const recent = scoreRecent.get(cid) || 0;
+      const prev = scorePrev.get(cid) || 0;
+      const delta = recent - prev;
+      if (recent <= 0) continue;
+      const c = constById.get(cid);
+      rows.push({ id: cid, name: c?.name || cid, delta, recent });
+    }
+    rows.sort((a, b) => (b.delta - a.delta) || (b.recent - a.recent));
+    return rows.slice(0, 5);
+  }, [signals, constituencies, stateConstituencies]);
 
   // FIX: Dynamic Party Filter based ONLY on the currently viewed state's candidates
   const uniqueParties = useMemo(() => {
@@ -106,6 +147,56 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
 
       <StateOverview state={activeState} />
 
+      <div className="border-b border-[#e4e4e7] shrink-0">
+        <div className="px-3 py-2 bg-[#f8fafc] flex items-center justify-between gap-2">
+          <span className="font-mono text-[10px] font-bold text-[#52525b] tracking-wider flex items-center gap-1.5">
+            <Activity className="h-3 w-3 text-[#dc2626] shrink-0" />
+            <span className="flex items-center gap-1">
+              HOTSPOTS (LAST 6H)
+              <span className="group relative cursor-help">
+                <HelpCircle className="h-2.5 w-2.5 text-[#a1a1aa]" />
+                <span className="absolute left-0 top-full mt-1 hidden group-hover:block bg-zinc-800 text-white text-[8px] font-normal tracking-normal p-2 rounded w-[220px] z-50 shadow-lg leading-snug normal-case">
+                  Constituencies where the sum of signal severities in the last 6 hours exceeds the prior 6-hour window (activity spike). Only rows with a resolved constituency_id are counted.
+                </span>
+              </span>
+            </span>
+          </span>
+          <span className="font-mono text-[9px] text-[#a1a1aa] shrink-0">TAP TO FOCUS</span>
+        </div>
+        {hotspots.length > 0 ? (
+          <div className="px-2 pb-2">
+            {hotspots.map((h) => (
+              <button
+                key={h.id}
+                onClick={() => {
+                  if (activeState === "ALL") {
+                    const c = constituencies.find((x: any) => x.id === h.id);
+                    if (c?.state) setGlobalStateFilter(c.state);
+                    setTimeout(() => setGlobalConstituencyId(h.id), 50);
+                  } else {
+                    setGlobalConstituencyId(h.id);
+                  }
+                }}
+                className="w-full flex items-center gap-2 px-2 py-2 rounded hover:bg-[#f4f4f5] transition-colors text-left"
+              >
+                <div className={`h-2 w-2 rounded-full shrink-0 ${h.delta >= 3 ? "bg-[#dc2626]" : h.delta >= 1 ? "bg-[#ea580c]" : "bg-[#16a34a]"}`} />
+                <div className="flex-1 min-w-0">
+                  <div className="font-mono text-[10px] text-[#27272a] truncate">{h.name}</div>
+                  <div className="font-mono text-[8px] text-[#71717a]">
+                    Δ {h.delta >= 0 ? `+${h.delta}` : h.delta} • Severity sum: {h.recent}
+                  </div>
+                </div>
+                <ChevronRight className="h-3 w-3 text-[#71717a] shrink-0" />
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="px-3 py-2 font-mono text-[10px] text-[#a1a1aa]">
+            No hotspots detected for this sector yet.
+          </div>
+        )}
+      </div>
+
       {isPendingState && (
         <div className="bg-[#fef08a] border-b border-[#facc15] px-3 py-2 flex items-start gap-2.5 shrink-0 shadow-sm">
           <AlertTriangle className="h-4 w-4 text-[#ca8a04] shrink-0 mt-0.5" />
@@ -142,8 +233,8 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
             SORT METRIC
             <span className="group relative cursor-help">
               <HelpCircle className="h-2 w-2" />
-              <div className="absolute left-0 top-full mt-1 hidden group-hover:block bg-gray-800 text-white text-[8px] p-2 rounded w-48 z-50">
-                Volatility (0-100%) is calculated based on live severe news signals, candidate criminal records, and historical win margins.
+              <div className="absolute left-0 top-full mt-1 hidden group-hover:block bg-zinc-800 text-white text-[8px] p-2 rounded w-52 z-50 leading-snug normal-case font-normal tracking-normal">
+                Stored 0–100 score per constituency from the data pipeline (contest pressure, candidate-risk hints, and severe OSINT signals where wired in). Not a poll; refine the worker formula as ECI/ADR fields land.
               </div>
             </span>
           </span>

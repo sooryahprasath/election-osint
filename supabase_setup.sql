@@ -133,4 +133,5 @@ alter publication supabase_realtime add table candidates;
 alter publication supabase_realtime add table signals;
 alter publication supabase_realtime add table briefings;
 alter publication supabase_realtime add table voter_turnout;
+alter publication supabase_realtime add table exit_polls;
 alter publication supabase_realtime add table live_results;
