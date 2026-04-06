@@ -91,7 +91,7 @@ export const LiveDataProvider = ({ children }: { children: React.ReactNode }) =>
       .on("postgres_changes", { event: "*", schema: "public", table: "signals" }, (payload) => {
         if (!isMounted) return;
 
-        console.log("Realtime Signal:", payload.eventType, payload.new?.id); // Keep this for debugging
+        console.log("Realtime Signal:", payload.eventType, 'new' in payload ? (payload.new as any).id : 'N/A');
 
         setSignals((prev) => {
           if (payload.eventType === "INSERT") {
