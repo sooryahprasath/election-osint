@@ -49,6 +49,8 @@ export interface IndiaMapProps {
   onSelectConstituency?: (id: string) => void;
   onSelectState?: (state: string) => void;
   onSelectSignal?: (signal: any) => void;
+  resetTrigger?: number;
+  onZoomChange?: (zoom: number) => void;
 }
 
 // Map Centers Dictionary for perfectly locked zooming
