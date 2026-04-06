@@ -155,10 +155,15 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
             <span className="flex min-w-0 flex-wrap items-center gap-1">
               <span className="whitespace-nowrap">HOTSPOTS (LAST 6H)</span>
               <IntelHelpTip label="What are hotspots?">
-                <span className="mb-1 block font-bold text-white">Hotspots (last 6 hours)</span>
-                Lists constituencies where <strong>OSINT attention spiked</strong>: we sum signal severity in the latest 6-hour window and compare it to the previous 6-hour window. A positive delta means more alert volume tied to that seat <em>right now</em> than just before.
-                <span className="mt-2 block border-t border-zinc-700 pt-2 text-zinc-400">
-                  Only signals with a resolved <code className="text-zinc-300">constituency_id</code> are counted. This is not a violence forecast—use it as a relative activity monitor.
+                <span className="mb-2 block font-semibold text-white">Hotspots (last 6 hours)</span>
+                <span className="mb-2 block text-zinc-200">
+                  <strong className="text-zinc-50">In plain words:</strong> these are seats where this dashboard is seeing a <em>jump in recent election-related alerts</em> compared with the six hours just before. Think of it as “where attention moved lately,” not as a verdict on what is true on the ground.
+                </span>
+                <span className="mb-2 block text-zinc-300">
+                  <strong className="text-zinc-100">How it is built:</strong> we compare two windows—<em>now vs six hours ago</em> (each window is six hours long). We only count items that could be tied to a <em>specific seat</em> on the map. Seats with no tied items will not appear.
+                </span>
+                <span className="mt-2 block border-t border-zinc-600 pt-2 text-[9px] text-zinc-400">
+                  <strong className="text-zinc-300">Disclaimer:</strong> this is <em>not</em> a government safety alert, a crime forecast, or proof that something bad will happen. It only reflects what this app has collected from feeds and automated tagging. Stories can be missed, miscategorised, or duplicated. Use it as one situational cue among many—not as legal or safety advice.
                 </span>
               </IntelHelpTip>
             </span>
@@ -185,7 +190,7 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
                 <div className="flex-1 min-w-0">
                   <div className="font-mono text-[10px] text-[#27272a] truncate">{h.name}</div>
                   <div className="font-mono text-[8px] text-[#71717a]">
-                    Δ {h.delta >= 0 ? `+${h.delta}` : h.delta} • Severity sum: {h.recent}
+                    vs prior 6h: {h.delta >= 0 ? `+${h.delta}` : h.delta} · this 6h strength: {h.recent}
                   </div>
                 </div>
                 <ChevronRight className="h-3 w-3 text-[#71717a] shrink-0" />
@@ -193,8 +198,8 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
             ))}
           </div>
         ) : (
-          <div className="px-3 py-2 font-mono text-[10px] text-[#a1a1aa]">
-            No hotspots detected for this sector yet.
+          <div className="px-3 py-2 text-[10px] text-[#a1a1aa] leading-snug">
+            No hotspots right now—news may be quiet, or alerts are not yet linked to a seat on the map.
           </div>
         )}
       </div>
@@ -234,10 +239,15 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
           <span className="font-mono text-[8px] text-[#71717a] tracking-wider flex items-center gap-1">
             SORT METRIC
             <IntelHelpTip label="What is volatility?">
-              <span className="mb-1 block font-bold text-white">Volatility index (0–100)</span>
-              A <strong>deterministic mathematical score</strong> (not a poll): recomputed from your database by the intel worker from (1) contest size—extra candidates beyond a two-way race, (2) affidavit risk—criminal-case counts capped and summed, (3) OSINT load—severity-weighted signals in the last 14 days with a resolved constituency. Components are capped and summed, then clamped to 0–100.
-              <span className="mt-2 block border-t border-zinc-700 pt-2 text-zinc-400">
-                Run <code className="text-zinc-300">python intel_ingestor.py</code> on a schedule to refresh scores after candidates/signals change.
+              <span className="mb-2 block font-semibold text-white">Volatility index (0 to 100)</span>
+              <span className="mb-2 block text-zinc-200">
+                <strong className="text-zinc-50">In plain words:</strong> a rough “how heated does this seat look on paper <em>inside this app</em>?” score. Higher usually means a busier contest (more candidates than a simple two-way fight), more declared criminal cases in the data we imported from affidavits, and/or more recent alerts linked to that seat. Lower means calmer by those same measures.
+              </span>
+              <span className="mb-2 block text-zinc-300">
+                <strong className="text-zinc-100">How it is built:</strong> the number is calculated automatically from your project’s database, blending those ingredients with fixed rules and limits so scores stay between 0 and 100. It is recomputed when your team runs the scheduled intel update job (not live second-by-second).
+              </span>
+              <span className="mt-2 block border-t border-zinc-600 pt-2 text-[9px] text-zinc-400">
+                <strong className="text-zinc-300">Disclaimer:</strong> this is <em>not</em> a prediction of who will win, not an official Election Commission rating, and not a substitute for polls or field reporting. If candidate or news data is incomplete, the score will be wrong or stale. Use it to sort and compare seats in this tool—not as financial, legal, or safety guidance.
               </span>
             </IntelHelpTip>
           </span>

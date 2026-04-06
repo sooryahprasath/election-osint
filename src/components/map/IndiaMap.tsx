@@ -510,7 +510,9 @@ export default function IndiaMap({
           ) : operationMode === "COUNTING_DAY" ? (
             <p className="font-mono text-[7px] leading-snug text-[#52525b] md:text-[8px]">Dots = leading party.</p>
           ) : (
-            <p className="font-mono text-[7px] leading-snug text-[#52525b] md:text-[8px]">Dots = volatility (G→O→R).</p>
+            <p className="font-mono text-[7px] leading-snug text-[#52525b] md:text-[8px]">
+              Seat dots: calmer (green) → busier score (orange/red). Not a forecast.
+            </p>
           )}
           <p className="mt-0.5 font-mono text-[7px] leading-snug text-[#a1a1aa] md:text-[8px]">
             {overlayMode === "VIDEOS" ? "Tiles = video signals." : "Rings = signal clusters."}

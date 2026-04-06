@@ -62,7 +62,7 @@ export default function IntelHelpTip({ label, children }: { label: string; child
             <div
               role="dialog"
               aria-modal="true"
-              className="fixed z-[210] overflow-y-auto overscroll-contain rounded-lg border border-zinc-600 bg-zinc-900 p-3 font-mono text-[8px] font-normal leading-relaxed text-zinc-100 shadow-2xl normal-case tracking-normal"
+              className="fixed z-[210] overflow-y-auto overscroll-contain rounded-lg border border-zinc-600 bg-zinc-900 p-3 text-[10px] font-normal leading-relaxed text-zinc-100 shadow-2xl normal-case tracking-normal"
               style={{
                 top: box.top,
                 left: box.left,

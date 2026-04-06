@@ -60,8 +60,11 @@ export default function ConstituencyCard({ constituency }: ConstituencyCardProps
             {(constituency.volatility_score || 0).toFixed(1)}%
           </span>
         </div>
-        <p className="font-mono text-[8px] text-[#a1a1aa] mb-2 leading-snug">
-          Mathematical 0–100 index: contest size (extra candidates), affidavit risk (criminal cases, capped), and recent OSINT severity on this seat—combined with fixed weights and clamped. Not a poll or vote model. Refreshed by <code className="text-[#71717a]">intel_ingestor</code>.
+        <p className="text-[9px] text-[#71717a] mb-2 leading-relaxed">
+          <strong className="text-[#52525b]">Plain summary:</strong> a 0–100 “how busy this seat looks here” score from this app’s data—crowded race, declared criminal cases we have on file, and recent alerts tied to this seat.{" "}
+          <span className="block mt-1 text-[#a1a1aa]">
+            <strong>Not</strong> a win prediction or official risk label. Updates when your background intel job runs. Data gaps make scores misleading—use as context only.
+          </span>
         </p>
         <VolatilityGauge score={constituency.volatility_score || 0} />
       </div>
