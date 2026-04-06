@@ -1,4 +1,5 @@
 import time
+import base64
 import requests
 from bs4 import BeautifulSoup
 import feedparser
@@ -14,10 +15,28 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 
 env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
-load_dotenv(dotenv_path=env_path)
+_loaded = load_dotenv(dotenv_path=env_path)
+if not _loaded and not os.getenv("SUPABASE_SERVICE_ROLE_KEY"):
+    print(f"WARN: dotenv did not load from {env_path} — export keys in the shell or fix the path.")
+
+
+def _jwt_role_hint(jwt: str | None) -> str:
+    if not jwt or jwt.count(".") != 2:
+        return "missing_or_not_jwt"
+    try:
+        payload_b64 = jwt.split(".")[1]
+        pad = "=" * (-len(payload_b64) % 4)
+        raw = base64.urlsafe_b64decode(payload_b64 + pad)
+        return str(json.loads(raw).get("role", "?"))
+    except Exception:
+        return "decode_error"
+
 
 SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL")
-SUPABASE_KEY = os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+SUPABASE_ANON_KEY = os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+# After RLS hardening, anon cannot INSERT into signals — use service role on the VM.
+SUPABASE_KEY = SUPABASE_SERVICE_ROLE_KEY or SUPABASE_ANON_KEY
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 
@@ -25,8 +44,22 @@ gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY) if YOUTUBE_API_KEY else None
 
 try:
-    if not SUPABASE_URL or not SUPABASE_KEY or not SUPABASE_KEY.startswith("ey"):
-        raise ValueError("Supabase credentials invalid.")
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise ValueError("Supabase URL or key missing.")
+    sr_role = _jwt_role_hint(SUPABASE_SERVICE_ROLE_KEY)
+    an_role = _jwt_role_hint(SUPABASE_ANON_KEY)
+    key_role = _jwt_role_hint(SUPABASE_KEY)
+    print(
+        f"[supabase] URL loaded: {bool(SUPABASE_URL)} | "
+        f"using_JWT_role={key_role!r} | "
+        f"service_key_present={bool(SUPABASE_SERVICE_ROLE_KEY)} (jwt_role={sr_role!r}) | "
+        f"anon_key_present={bool(SUPABASE_ANON_KEY)} (jwt_role={an_role!r})"
+    )
+    if key_role != "service_role":
+        print(
+            "WARN: Active key is not service_role — INSERT into signals will fail under RLS. "
+            "Set SUPABASE_SERVICE_ROLE_KEY on the VM (same project as URL) and restart."
+        )
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 except Exception as e:
     print(f"CRITICAL: Supabase offline: {e}")
