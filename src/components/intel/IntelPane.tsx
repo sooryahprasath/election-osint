@@ -155,7 +155,25 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
         </div>
 
         {sorted.length > 0 ? sorted.map((c) => (
-          <button key={c.id} onClick={() => setGlobalConstituencyId(c.id)} className="flex items-center w-full px-3 py-2 hover:bg-[#f4f4f5] transition-colors border-b border-[#ffffff] group text-left">
+          <button
+            key={c.id}
+            onClick={() => {
+              if (c.state && c.state !== activeState) {
+                // 1. Change the map state first
+                setGlobalStateFilter(c.state);
+
+                // 2. Wait 50ms for the parent components to finish their reset logic, 
+                // THEN apply the constituency ID so it sticks permanently.
+                setTimeout(() => {
+                  setGlobalConstituencyId(c.id);
+                }, 50);
+              } else {
+                // If we are already in the correct state view, just set it instantly
+                setGlobalConstituencyId(c.id);
+              }
+            }}
+            className="flex items-center w-full px-3 py-2 hover:bg-[#f4f4f5] transition-colors border-b border-[#ffffff] group text-left"
+          >
             <div className="h-6 w-1 rounded-full mr-2.5 shrink-0" style={{ backgroundColor: (c.volatility_score || 0) >= 70 ? "#dc2626" : (c.volatility_score || 0) >= 40 ? "#ea580c" : "#16a34a" }} />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">

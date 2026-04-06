@@ -11,7 +11,7 @@ import SignalModal from "@/components/signals/SignalModal";
 import VotingHud from "@/components/warroom/VotingHud";
 import { useLiveData } from "@/lib/context/LiveDataContext";
 
-// FIX: Added the missing '/' after '@' in the import path
+// Dynamic import with no SSR
 const IndiaMap = dynamic(() => import("@/components/map/IndiaMap"), { ssr: false });
 const TOPBAR_H = 36; const BOTTOMBAR_H = 28; const SIDEBAR_W = 280;
 
@@ -23,6 +23,10 @@ export default function Home() {
   const [activeSignal, setActiveSignal] = useState<any | null>(null);
   const [mobilePane, setMobilePane] = useState<"signals" | "map" | "intel" | "warroom">("map");
 
+  // FIX: Added state to track map zoom level for the reset button
+  const [mapZoom, setMapZoom] = useState(1);
+  const [resetTrigger, setResetTrigger] = useState(0);
+
   const handleStateFilter = (s: string) => {
     setGlobalStateFilter(s);
     setGlobalConstituencyId(null);
@@ -33,12 +37,24 @@ export default function Home() {
     setGlobalStateFilter("ALL");
     setGlobalConstituencyId(null);
     setFlyToState("India");
+    setResetTrigger(prev => prev + 1); // Triggers the map to completely reset viewport
     setMobilePane("map");
   };
 
   return (
     <>
-      <IndiaMap flyToState={flyToState} activeState={globalStateFilter} activeConstituencyId={globalConstituencyId} onSelectConstituency={id => { setGlobalConstituencyId(id); if (window.innerWidth < 768) setMobilePane("intel"); }} onSelectState={handleStateFilter} onSelectSignal={setActiveSignal} />
+      {/* FIX: Passing resetTrigger and onZoomChange to IndiaMap */}
+      <IndiaMap
+        flyToState={flyToState}
+        activeState={globalStateFilter}
+        activeConstituencyId={globalConstituencyId}
+        onSelectConstituency={id => { setGlobalConstituencyId(id); if (window.innerWidth < 768) setMobilePane("intel"); }}
+        onSelectState={handleStateFilter}
+        onSelectSignal={setActiveSignal}
+        resetTrigger={resetTrigger}
+        onZoomChange={setMapZoom}
+      />
+
       <TopBar />
 
       {/* THE NEW WAR ROOM HUD */}
@@ -52,26 +68,15 @@ export default function Home() {
         <IntelPane globalStateFilter={globalStateFilter} setGlobalStateFilter={handleStateFilter} globalConstituencyId={globalConstituencyId} setGlobalConstituencyId={setGlobalConstituencyId} />
       </aside>
 
-      {/* DESKTOP FLOATING RESET BUTTON */}
-      {(globalStateFilter !== "ALL" || globalConstituencyId) && (
-        <div className="hidden md:flex fixed bottom-[48px] left-1/2 transform -translate-x-1/2 z-30 animate-fade-in-up">
+      {/* DESKTOP & MOBILE FLOATING RESET BUTTON */}
+      {/* FIX: Button appears if a state is selected, a constituency is selected, OR if the user manually zoomed the map in! */}
+      {(globalStateFilter !== "ALL" || globalConstituencyId || mapZoom > 1.5) && mobilePane === "map" && (
+        <div className="fixed bottom-[90px] md:bottom-[48px] left-1/2 transform -translate-x-1/2 z-30 animate-fade-in-up">
           <button
             onClick={handleResetZoom}
             className="bg-white/95 backdrop-blur-md shadow-[0_4px_15px_rgba(0,0,0,0.1)] border border-[#0284c7] px-5 py-2.5 rounded-full font-mono text-[11px] font-bold text-[#0284c7] flex items-center gap-2 transition-all hover:bg-[#0284c7] hover:text-white active:scale-95"
           >
-            <Maximize className="w-3.5 h-3.5" /> RESET TO NATIONAL OVERVIEW
-          </button>
-        </div>
-      )}
-
-      {/* MOBILE FLOATING RESET BUTTON (Only shows when zoomed into a state/constituency AND Map is active) */}
-      {(globalStateFilter !== "ALL" || globalConstituencyId) && mobilePane === "map" && (
-        <div className="md:hidden fixed bottom-[90px] left-1/2 transform -translate-x-1/2 z-50 animate-fade-in-up">
-          <button
-            onClick={handleResetZoom}
-            className="bg-white/95 backdrop-blur-md shadow-[0_0_15px_rgba(0,0,0,0.15)] border border-[#0284c7] px-4 py-2.5 rounded-full font-mono text-[10px] font-bold text-[#0284c7] flex items-center gap-2 transition-all active:scale-95"
-          >
-            <Maximize className="w-3.5 h-3.5" /> ZOOM OUT
+            <Maximize className="w-3.5 h-3.5" /> {window.innerWidth < 768 ? "ZOOM OUT" : "RESET TO NATIONAL OVERVIEW"}
           </button>
         </div>
       )}
