@@ -99,13 +99,13 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
 
   if (selectedConstituency) {
     return (
-      <aside className="flex flex-col h-full w-full overflow-hidden bg-[#ffffff] border-l border-[#e4e4e7]">
+      <aside className="flex min-h-0 flex-1 flex-col w-full overflow-hidden bg-[#ffffff] border-l border-[#e4e4e7]">
         <div className="flex items-center gap-2 px-3 py-2 border-b border-[#e4e4e7] shrink-0">
           <button onClick={() => setGlobalConstituencyId(null)} className="font-mono text-[10px] text-[#16a34a] hover:text-[#16a34a]/80 transition-colors">← BACK</button>
           <span className="font-mono text-[10px] text-[#71717a]">/</span>
           <span className="font-mono text-[10px] text-[#52525b] truncate">{selectedConstituency.name.toUpperCase()}</span>
         </div>
-        <div className="flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y">
           <ConstituencyCard constituency={selectedConstituency} />
         </div>
       </aside>
@@ -113,7 +113,7 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
   }
 
   return (
-    <aside className="flex flex-col h-full w-full overflow-hidden bg-[#ffffff] border-l border-[#e4e4e7]">
+    <aside className="flex min-h-0 flex-1 flex-col w-full overflow-hidden bg-[#ffffff] border-l border-[#e4e4e7]">
       <div className="flex items-center justify-between px-3 py-2 border-b border-[#e4e4e7] shrink-0">
         <div className="flex items-center gap-2">
           <Filter className="h-3.5 w-3.5 text-[#0284c7]" />
@@ -227,7 +227,7 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y">
         <div className="px-2 py-1.5 flex justify-between items-center bg-[#f4f4f5] border-b border-[#e4e4e7]">
           <span className="font-mono text-[8px] text-[#71717a] tracking-wider flex items-center gap-1">
             SORT METRIC

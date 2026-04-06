@@ -72,7 +72,7 @@ export default function Home() {
         <SignalPane globalStateFilter={globalStateFilter} setGlobalStateFilter={handleStateFilter} globalConstituencyId={globalConstituencyId} onSelectSignal={setActiveSignal} />
       </aside>
 
-      <aside className={`fixed top-[36px] bottom-[76px] md:bottom-[28px] right-0 w-full md:w-[280px] z-40 bg-white/95 backdrop-blur-md border-l border-[#e4e4e7] transition-transform duration-300 ${mobilePane === "intel" ? "translate-x-0" : "translate-x-full md:translate-x-0"}`}>
+      <aside className={`fixed top-[36px] bottom-[76px] md:bottom-[28px] right-0 flex min-h-0 w-full flex-col overflow-hidden md:w-[280px] z-40 bg-white/95 backdrop-blur-md border-l border-[#e4e4e7] transition-transform duration-300 ${mobilePane === "intel" ? "translate-x-0" : "translate-x-full md:translate-x-0"}`}>
         <IntelPane globalStateFilter={globalStateFilter} setGlobalStateFilter={handleStateFilter} globalConstituencyId={globalConstituencyId} setGlobalConstituencyId={setGlobalConstituencyId} />
       </aside>
 
