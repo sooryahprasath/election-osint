@@ -11,6 +11,127 @@ if (!apiKey) {
 
 const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
 
+const TRACKING_QUERY_KEYS = new Set([
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_term",
+  "utm_content",
+  "utm_id",
+  "utm_name",
+  "utm_reader",
+  "utm_viz_id",
+  "utm_pubreferrer",
+  "gclid",
+  "dclid",
+  "fbclid",
+  "igshid",
+  "mc_cid",
+  "mc_eid",
+  "ref",
+  "referrer",
+  "ref_src",
+  "source",
+  "src",
+  "cmpid",
+  "cmp",
+  "mkt_tok",
+  "spm",
+  "_ga",
+  "ocid",
+]);
+
+function canonicalizeUrl(u: unknown): string | null {
+  if (typeof u !== "string") return null;
+  const raw = u.trim();
+  if (!raw) return null;
+  try {
+    const url = new URL(raw.includes("://") ? raw : `https://${raw}`);
+    url.hash = "";
+    url.protocol = "https:";
+    url.hostname = url.hostname.toLowerCase().replace(/^www\./, "");
+
+    // remove default ports
+    if (url.port === "443") url.port = "";
+
+    // normalize pathname
+    url.pathname = url.pathname.replace(/\/{2,}/g, "/");
+    if (url.pathname !== "/") url.pathname = url.pathname.replace(/\/+$/, "");
+
+    // strip tracking params and sort remainder
+    const entries = Array.from(url.searchParams.entries()).filter(([k]) => !TRACKING_QUERY_KEYS.has(k.toLowerCase()));
+    entries.sort((a, b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]));
+    url.search = "";
+    for (const [k, v] of entries) url.searchParams.append(k.toLowerCase(), v);
+
+    return url.toString();
+  } catch {
+    return raw.toLowerCase();
+  }
+}
+
+function extractYouTubeId(u: unknown): string | null {
+  if (typeof u !== "string") return null;
+  const raw = u.trim();
+  if (!raw) return null;
+  try {
+    const url = new URL(raw.includes("://") ? raw : `https://${raw}`);
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    if (host === "youtu.be") {
+      const id = url.pathname.split("/").filter(Boolean)[0];
+      return id || null;
+    }
+    if (host.endsWith("youtube.com") || host.endsWith("youtube-nocookie.com")) {
+      const v = url.searchParams.get("v");
+      if (v) return v;
+      const m = url.pathname.match(/^\/(shorts|embed)\/([^/?#]+)/);
+      if (m?.[2]) return m[2];
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function simhash32(text: string): number {
+  const s = text.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!s) return 0;
+  const tokens = (s.match(/[a-z0-9]{2,}/g) || []).slice(0, 800);
+  if (tokens.length === 0) return 0;
+  const v = new Array<number>(32).fill(0);
+
+  // FNV-1a 32-bit for stable token hashing (ES2019 safe).
+  const fnv32 = (t: string): number => {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < t.length; i++) {
+      h ^= t.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    return h;
+  };
+
+  for (const tok of tokens) {
+    const x = fnv32(tok) >>> 0;
+    for (let i = 0; i < 32; i++) {
+      v[i] += (x >>> i) & 1 ? 1 : -1;
+    }
+  }
+  let out = 0;
+  for (let i = 0; i < 32; i++) if (v[i] > 0) out |= 1 << i;
+  return out;
+}
+
+function popcount32(x: number): number {
+  // Hacker's Delight popcount for 32-bit ints.
+  x = x - ((x >>> 1) & 0x55555555);
+  x = (x & 0x33333333) + ((x >>> 2) & 0x33333333);
+  return (((x + (x >>> 4)) & 0x0f0f0f0f) * 0x01010101) >>> 24;
+}
+
+function hamming32(a: number, b: number): number {
+  return popcount32((a ^ b) >>> 0);
+}
+
 function validIndiaCoords(lat: unknown, lng: unknown, geoConfidence: number): { lat: number; lng: number } | null {
   const a = Number(lat);
   const b = Number(lng);
@@ -20,8 +141,17 @@ function validIndiaCoords(lat: unknown, lng: unknown, geoConfidence: number): { 
   return { lat: a, lng: b };
 }
 
+const MAX_INGEST_BODY_BYTES = 512_000;
+
 export async function POST(req: Request) {
   try {
+    const isProd = process.env.NODE_ENV === "production";
+    if (isProd && !ingestSecret) {
+      return NextResponse.json(
+        { success: false, error: "Ingest disabled: set INGEST_SHARED_SECRET in production." },
+        { status: 503 }
+      );
+    }
     if (ingestSecret) {
       const hdr = req.headers.get("x-ingest-secret");
       const auth = req.headers.get("authorization");
@@ -32,12 +162,15 @@ export async function POST(req: Request) {
     }
 
     const bodyText = await req.text();
+    if (bodyText.length > MAX_INGEST_BODY_BYTES) {
+      return NextResponse.json({ success: false, error: "Payload too large" }, { status: 413 });
+    }
     const data =
       typeof bodyText === "string" && bodyText.startsWith("{")
         ? JSON.parse(bodyText)
         : { title: "", summary: bodyText, source: "Unknown" };
 
-    let { source, title, body } = data;
+    let { source, title, body, source_url } = data;
 
     if (!body && data.summary) body = data.summary;
 
@@ -87,8 +220,55 @@ export async function POST(req: Request) {
     const geoC = Number(analysis.geo_confidence) || 0;
     const coords = validIndiaCoords(analysis.latitude, analysis.longitude, geoC);
 
+    const db = getServiceSupabase();
+    if (!db) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Server missing SUPABASE_SERVICE_ROLE_KEY (required to insert signals when RLS blocks anon).",
+        },
+        { status: 500 }
+      );
+    }
+
+    // Dedupe alignment: canonical URL + YouTube ID hard dedupe, and simhash near-dup within a recent window.
+    const canonUrl = canonicalizeUrl(source_url);
+    const ytId = extractYouTubeId(source_url);
+    const since24h = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    const since3d = new Date(Date.now() - 72 * 3600 * 1000).toISOString();
+
+    if (canonUrl || ytId) {
+      const { data: dup } = await db
+        .from("signals")
+        .select("id,source_url,created_at")
+        .gte("created_at", since3d)
+        .eq("source_url", canonUrl || source_url)
+        .limit(1);
+      if (dup && dup.length > 0) {
+        return NextResponse.json({ success: true, deduped: true, reason: "hard_url", processed: analysis, saved: null });
+      }
+    }
+
+    const incomingHash = simhash32(`${title || ""} ${body || ""}`);
+    if (incomingHash !== 0) {
+      const { data: recent } = await db
+        .from("signals")
+        .select("title,body,created_at")
+        .gte("created_at", since24h)
+        .order("created_at", { ascending: false })
+        .limit(200);
+      for (const r of recent || []) {
+        const h = simhash32(`${(r as any).title || ""} ${(r as any).body || ""}`);
+        // 32-bit hash is coarser: keep a tight threshold.
+        if (h !== 0 && hamming32(incomingHash, h) <= 2) {
+          return NextResponse.json({ success: true, deduped: true, reason: "soft_simhash", processed: analysis, saved: null });
+        }
+      }
+    }
+
     const insertRow: Record<string, unknown> = {
       source,
+      source_url: canonUrl || null,
       title,
       body,
       state: (analysis.state as string) || null,
@@ -100,17 +280,6 @@ export async function POST(req: Request) {
     if (coords) {
       insertRow.latitude = coords.lat;
       insertRow.longitude = coords.lng;
-    }
-
-    const db = getServiceSupabase();
-    if (!db) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Server missing SUPABASE_SERVICE_ROLE_KEY (required to insert signals when RLS blocks anon).",
-        },
-        { status: 500 }
-      );
     }
 
     const { data: dbData, error } = await db.from("signals").insert(insertRow).select().single();

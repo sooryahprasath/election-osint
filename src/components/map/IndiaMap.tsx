@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { ComposableMap, Geographies, Geography, Marker, ZoomableGroup } from "react-simple-maps";
 import { geoMercator, geoPath } from "d3-geo";
 import { useLiveData } from "@/lib/context/LiveDataContext";
 import { AlertTriangle, Layers } from "lucide-react";
 import { STATE_META } from "@/lib/utils/states";
+import { excludeFromIntelligenceFeed } from "@/lib/utils/signalClassifier";
 
 const ELECTION_STATES = ["Kerala", "Assam", "Puducherry", "Tamil Nadu", "West Bengal"];
 
@@ -119,6 +120,9 @@ export default function IndiaMap({
 }: IndiaMapProps) {
   const { constituencies, signals, operationMode, liveResults } = useLiveData();
 
+  const shellRef = useRef<HTMLDivElement>(null);
+  const [shellSize, setShellSize] = useState<{ w: number; h: number }>({ w: 800, h: 700 });
+
   const [currentView, setCurrentView] = useState("India");
   const [geoData, setGeoData] = useState<any>(null);
   const [tooltipContent, setTooltipContent] = useState("");
@@ -149,12 +153,39 @@ export default function IndiaMap({
 
   const [position, setPosition] = useState({ coordinates: getCenterCoords("India"), zoom: 1 });
 
+  // Recenter projection + viewBox for the actual map pane size.
+  useLayoutEffect(() => {
+    const el = shellRef.current;
+    if (!el) return;
+    const apply = () => {
+      const r = el.getBoundingClientRect();
+      const w = Math.max(320, Math.round(r.width));
+      const h = Math.max(320, Math.round(r.height));
+      setShellSize((prev) => (prev.w === w && prev.h === h ? prev : { w, h }));
+    };
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    window.addEventListener("resize", apply);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", apply);
+    };
+  }, []);
+
   useEffect(() => {
     onZoomChangeRef.current = onZoomChange;
   }, [onZoomChange]);
 
   const isVotingDay = operationMode === "VOTING_DAY";
   const isCountingDay = operationMode === "COUNTING_DAY";
+  const indiaMinZoom = isMobile ? 0.9 : 0.72;
+  const indiaDefaultZoom = useMemo(() => {
+    // Fit-to-pane: smaller panes should start slightly zoomed out.
+    const fit = Math.min(shellSize.w / 900, shellSize.h / 760);
+    const z = Math.max(indiaMinZoom, Math.min(1, fit));
+    return z;
+  }, [shellSize.w, shellSize.h, indiaMinZoom]);
 
   useEffect(() => {
     positionRef.current = position;
@@ -201,11 +232,11 @@ export default function IndiaMap({
     skipViewLerpRef.current = true;
     suppressMoveEndRef.current = true;
     setCurrentView("India");
-    const snap = { coordinates: getCenterCoords("India"), zoom: 1 };
+    const snap = { coordinates: getCenterCoords("India"), zoom: indiaDefaultZoom };
     positionRef.current = snap;
     setPosition(snap);
     releaseSuppressMoveEndSoon();
-  }, [resetTrigger]);
+  }, [resetTrigger, indiaDefaultZoom]);
 
   useEffect(() => {
     if (stateViewSnapTrigger === undefined || stateViewSnapTrigger < 1) return;
@@ -235,7 +266,7 @@ export default function IndiaMap({
       return;
     }
     suppressMoveEndRef.current = true;
-    const target = { coordinates: getCenterCoords(currentView), zoom: 1 };
+    const target = { coordinates: getCenterCoords(currentView), zoom: currentView === "India" ? indiaDefaultZoom : 1 };
     positionRef.current = target;
     setPosition(target);
     onZoomChangeRef.current?.(target.zoom);
@@ -249,7 +280,7 @@ export default function IndiaMap({
       clearTimeout(fallback);
       clearTimeout(release);
     };
-  }, [currentView]);
+  }, [currentView, indiaDefaultZoom]);
 
   useEffect(() => {
     if (!geoData || !viewTransitionRef.current) return;
@@ -297,19 +328,25 @@ export default function IndiaMap({
   // 📍 D3 Projection - STRICTLY UNTOUCHED
   const projectionConfig = useMemo(() => {
     const p = geoMercator();
-    if (currentView === "India") return p.scale(isMobile ? 1400 : 1150).center([85.5, 28.5]);
-    if (currentView === "Kerala") return p.scale(isMobile ? 14500 : 7555).center([75.3, 11.6]);
-    if (currentView === "Assam") return p.scale(isMobile ? 7000 : 7500).center([93.5, 26.9]);
-    if (currentView === "Tamil Nadu") return p.scale(isMobile ? 11000 : 6000).center([78.70, 11.9]);
-    if (currentView === "West Bengal") return p.scale(isMobile ? 10000 : 5500).center([87.9, 25.3]);
+    p.translate([shellSize.w / 2, shellSize.h / 2]);
+    if (currentView === "India") {
+      const fit = Math.min(shellSize.w / 1920, shellSize.h / 1080);
+      const k = Math.max(1.0, Math.min(0.70, fit));
+      return p.scale((isMobile ? 1700 : 1200) * k).center([84.5, -20.0]);
+    }
+    if (currentView === "Kerala") return p.scale(isMobile ? 14500 : 7555).center([75.3, 11.35]);
+    if (currentView === "Assam") return p.scale(isMobile ? 7000 : 7500).center([93.5, 26.45]);
+    if (currentView === "Tamil Nadu") return p.scale(isMobile ? 11000 : 6000).center([78.70, 11.3]);
+    if (currentView === "West Bengal") return p.scale(isMobile ? 7900 : 5000).center([87.9, 26.0]);
     if (currentView === "Puducherry") return p.scale(isMobile ? 125000 : 99000).center([79.74, 12.00]);
-    return p.scale(1150).center([85.5, 28.5]);
-  }, [currentView, isMobile]);
+    return p.scale(1200).center([84.5, -20.0]);
+  }, [currentView, isMobile, shellSize.w, shellSize.h]);
 
   const pathGenerator = geoPath().projection(projectionConfig);
 
   const visibleSignals = useMemo(() => {
     const scoped = signals.filter((s: any) => {
+      if (excludeFromIntelligenceFeed(s)) return false;
       if (verifiedOnly && !s.verified) return false;
       if (currentView !== "India" && s.state !== currentView) return false;
       return true;
@@ -416,16 +453,14 @@ export default function IndiaMap({
   const fS = Math.max(1.2, 4.5 / zoomFactor); // Dynamic Font Size
   const sW = 1.0 / zoomFactor;             // FIX: Restored Stroke Width Variable!
 
-  /* TopBar is position:fixed and does not consume flow. Do NOT subtract 36px from height + start at y=0
-   * (that leaves a topbar-sized gap above the footer). Use pt-9 and height = 100vh − footer − HUD only. */
-  const mapShellStyle = {
-    height: "calc(100vh - var(--war-hud-reserve, 0px) - var(--map-footer-stack, 28px))",
-  } as const;
+  /* This map is rendered inside the Center pane, which already sits below TopBar.
+   * So we should fill the parent (no internal top padding, no 100vh math) to avoid a blank strip. */
+  const mapShellStyle = { height: "100%" } as const;
 
   if (mapError)
     return (
       <div
-        className="box-border flex w-full min-h-0 flex-col pt-9"
+        className="box-border flex w-full min-h-0 flex-col"
         style={mapShellStyle}
       >
         <div className="flex min-h-0 flex-1 items-center justify-center font-mono text-red-500">
@@ -436,7 +471,7 @@ export default function IndiaMap({
   if (!geoData)
     return (
       <div
-        className="box-border flex w-full min-h-0 flex-col bg-transparent pt-9"
+        className="box-border flex w-full min-h-0 flex-col bg-transparent"
         style={mapShellStyle}
       >
         <div className="flex min-h-0 flex-1 items-center justify-center font-mono text-zinc-400">
@@ -446,12 +481,12 @@ export default function IndiaMap({
     );
 
   return (
-    <div className="box-border flex w-full min-h-0 flex-col pt-9" style={mapShellStyle}>
+    <div className="box-border flex w-full min-h-0 flex-col" style={mapShellStyle}>
       <div
         className="relative min-h-0 w-full flex-1 overflow-hidden"
         style={{
-          backgroundColor: "#cbd5e1",
-          backgroundImage: "radial-gradient(rgba(51,65,85,0.14) 1px, transparent 1px)",
+          backgroundColor: "var(--surface-3)",
+          backgroundImage: "radial-gradient(rgba(148,163,184,0.16) 1px, transparent 1px)",
           backgroundSize: "20px 20px",
         }}
       >
@@ -459,21 +494,22 @@ export default function IndiaMap({
       {!hideMapChrome && (
       <div
         ref={mapLayersWrapRef}
-        className="absolute bottom-16 right-2 z-[55] flex flex-col items-end gap-1.5 pointer-events-auto select-none max-md:bottom-[6.75rem] md:bottom-3 md:right-[292px] md:z-40"
+        className="absolute right-2 z-[55] flex flex-col items-end gap-1.5 pointer-events-auto select-none md:right-2 md:z-40"
+        style={{ bottom: "calc(var(--map-footer-stack, 58px) + var(--war-hud-reserve, 0px) + 86px)" }}
       >
         {mapLayersOpen && (
           <div
-            className="w-[min(17rem,calc(100vw-3.5rem))] rounded-lg border border-[#e4e4e7] bg-white/95 py-2 pl-2 pr-2 shadow-lg backdrop-blur-md"
+            className="w-[min(17rem,calc(100vw-3.5rem))] rounded-lg border border-[color:var(--border)] bg-[var(--surface-1)]/95 py-2 pl-2 pr-2 shadow-lg backdrop-blur-md"
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <div className="mb-1.5 font-mono text-[8px] font-bold tracking-wider text-[#71717a]">MAP LAYERS</div>
+            <div className="mb-1.5 font-mono text-[8px] font-bold tracking-wider text-[var(--text-muted)]">MAP LAYERS</div>
             <div className="flex flex-col gap-1.5">
               <div className="flex flex-wrap gap-1">
                 <button
                   type="button"
                   title="Video-linked signals as thumbnails (AI lat/long when present)."
                   onClick={() => onChangeOverlayMode && onChangeOverlayMode("VIDEOS")}
-                  className={`rounded-md px-2 py-1.5 font-mono text-[8px] font-bold transition-colors ${overlayMode === "VIDEOS" ? "bg-sky-50 text-[#0284c7] ring-1 ring-sky-200" : "bg-[#fafafa] text-[#52525b] ring-1 ring-[#e4e4e7] hover:bg-[#f4f4f5]"}`}
+                  className={`rounded-md px-2 py-1.5 font-mono text-[8px] font-bold transition-colors ${overlayMode === "VIDEOS" ? "bg-sky-500/10 text-[#0284c7] ring-1 ring-sky-500/25" : "bg-[var(--surface-2)] text-[var(--text-secondary)] ring-1 ring-[color:var(--border)] hover:bg-[var(--surface-3)]"}`}
                 >
                   VIDEOS
                 </button>
@@ -481,7 +517,7 @@ export default function IndiaMap({
                   type="button"
                   title="All signals clustered by coordinates (or constituency centroid)."
                   onClick={() => onChangeOverlayMode && onChangeOverlayMode("ALL")}
-                  className={`rounded-md px-2 py-1.5 font-mono text-[8px] font-bold transition-colors ${overlayMode === "ALL" ? "bg-emerald-50 text-[#16a34a] ring-1 ring-emerald-200" : "bg-[#fafafa] text-[#52525b] ring-1 ring-[#e4e4e7] hover:bg-[#f4f4f5]"}`}
+                  className={`rounded-md px-2 py-1.5 font-mono text-[8px] font-bold transition-colors ${overlayMode === "ALL" ? "bg-emerald-500/10 text-[#16a34a] ring-1 ring-emerald-500/25" : "bg-[var(--surface-2)] text-[var(--text-secondary)] ring-1 ring-[color:var(--border)] hover:bg-[var(--surface-3)]"}`}
                 >
                   ALL SIGNALS
                 </button>
@@ -489,12 +525,12 @@ export default function IndiaMap({
                   type="button"
                   title="Verified sources only"
                   onClick={() => onToggleVerifiedOnly && onToggleVerifiedOnly()}
-                  className={`rounded-md px-2 py-1.5 font-mono text-[8px] font-bold transition-colors ${verifiedOnly ? "bg-emerald-50 text-[#16a34a] ring-1 ring-emerald-200" : "bg-[#fafafa] text-[#52525b] ring-1 ring-[#e4e4e7] hover:bg-[#f4f4f5]"}`}
+                  className={`rounded-md px-2 py-1.5 font-mono text-[8px] font-bold transition-colors ${verifiedOnly ? "bg-emerald-500/10 text-[#16a34a] ring-1 ring-emerald-500/25" : "bg-[var(--surface-2)] text-[var(--text-secondary)] ring-1 ring-[color:var(--border)] hover:bg-[var(--surface-3)]"}`}
                 >
                   VERIFIED
                 </button>
               </div>
-              <p className="font-mono text-[7px] leading-snug text-[#a1a1aa]">
+              <p className="font-mono text-[7px] leading-snug text-[var(--text-muted)]">
                 {overlayMode === "ALL"
                   ? "Clusters every in-scope signal (precise when lat/long is ingested)."
                   : "Thumbnails for video-linked signals only."}
@@ -510,7 +546,7 @@ export default function IndiaMap({
             e.stopPropagation();
             setMapLayersOpen((o) => !o);
           }}
-          className="flex h-9 w-9 items-center justify-center rounded-full border border-[#e4e4e7] bg-white/95 text-[#52525b] shadow-md backdrop-blur-md transition-colors hover:border-sky-300 hover:text-[#0284c7] active:scale-95"
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-[color:var(--border)] bg-[var(--surface-1)]/95 text-[var(--text-secondary)] shadow-md backdrop-blur-md transition-colors hover:border-sky-300 hover:text-[#0284c7] active:scale-95"
         >
           <Layers className="h-4 w-4" strokeWidth={2} />
         </button>
@@ -518,19 +554,22 @@ export default function IndiaMap({
       )}
 
       {!hideMapChrome && (
-      <div className="pointer-events-none absolute bottom-16 left-2 z-[55] max-w-[9.5rem] select-none max-md:bottom-[6.75rem] md:bottom-3 md:left-[292px] md:z-30 md:max-w-[13rem]">
-        <div className="rounded-md border border-[#e4e4e7]/80 bg-white/85 px-2 py-1 shadow-sm backdrop-blur-sm">
-          <div className="mb-0.5 font-mono text-[7px] font-bold tracking-wider text-[#71717a]">LEGEND</div>
+      <div
+        className="pointer-events-none absolute left-2 z-[55] max-w-[9.5rem] select-none md:left-2 md:z-30 md:max-w-[13rem]"
+        style={{ bottom: "calc(var(--map-footer-stack, 58px) + var(--war-hud-reserve, 0px) + 86px)" }}
+      >
+        <div className="rounded-md border border-[color:var(--border)] bg-[var(--surface-1)]/85 px-2 py-1 shadow-sm backdrop-blur-sm">
+          <div className="mb-0.5 font-mono text-[7px] font-bold tracking-wider text-[var(--text-muted)]">LEGEND</div>
           {operationMode === "VOTING_DAY" ? (
-            <p className="font-mono text-[7px] leading-snug text-[#52525b] md:text-[8px]">Dots = turnout (low→high).</p>
+            <p className="font-mono text-[7px] leading-snug text-[var(--text-secondary)] md:text-[8px]">Dots = turnout (low→high).</p>
           ) : operationMode === "COUNTING_DAY" ? (
-            <p className="font-mono text-[7px] leading-snug text-[#52525b] md:text-[8px]">Dots = leading party.</p>
+            <p className="font-mono text-[7px] leading-snug text-[var(--text-secondary)] md:text-[8px]">Dots = leading party.</p>
           ) : (
-            <p className="font-mono text-[7px] leading-snug text-[#52525b] md:text-[8px]">
+            <p className="font-mono text-[7px] leading-snug text-[var(--text-secondary)] md:text-[8px]">
               Seat dots: calmer (green) → busier score (orange/red). Not a forecast.
             </p>
           )}
-          <p className="mt-0.5 font-mono text-[7px] leading-snug text-[#a1a1aa] md:text-[8px]">
+          <p className="mt-0.5 font-mono text-[7px] leading-snug text-[var(--text-muted)] md:text-[8px]">
             {overlayMode === "VIDEOS" ? "Tiles = video signals." : "Rings = signal clusters."}
           </p>
         </div>
@@ -538,13 +577,14 @@ export default function IndiaMap({
       )}
 
       <div
+        ref={shellRef}
         className="absolute inset-0 transition-opacity duration-300 ease-out"
         style={{ opacity: mapShellOpacity }}
       >
         <ComposableMap
           projection={projectionConfig as any}
-          width={800}
-          height={isMobile ? 900 : 700}
+          width={shellSize.w}
+          height={shellSize.h}
           style={{ width: "100%", height: "100%", display: "block", outline: "none" }}
         >
           <ZoomableGroup
@@ -565,7 +605,7 @@ export default function IndiaMap({
               setPosition(next);
               onZoomChange?.(z);
             }}
-            minZoom={1}
+            minZoom={currentView === "India" ? indiaMinZoom : 1}
             maxZoom={12}
           >
             <defs>
@@ -881,19 +921,19 @@ export default function IndiaMap({
       {(tooltipContent || constituencyTip) && (
         <div
           ref={tooltipRef}
-          className={`fixed z-[100] pointer-events-none bg-white text-zinc-800 border border-zinc-200 shadow-lg rounded-md transform -translate-x-1/2 -translate-y-[150%] max-w-[240px] ${constituencyTip ? "px-3 py-2" : "px-3 py-1.5 font-mono text-[10px] font-bold uppercase tracking-wider"}`}
+          className={`fixed z-[100] pointer-events-none bg-[var(--surface-1)] text-[var(--text-primary)] border border-[color:var(--border)] shadow-lg rounded-md transform -translate-x-1/2 -translate-y-[150%] max-w-[240px] ${constituencyTip ? "px-3 py-2" : "px-3 py-1.5 font-mono text-[10px] font-bold uppercase tracking-wider"}`}
           style={{ display: "block" }}
         >
           {constituencyTip ? (
             <div className="space-y-1">
               <div className="font-mono text-[10px] font-bold text-[#16a34a] leading-tight">{String(constituencyTip.name || "").toUpperCase()}</div>
-              <div className="font-mono text-[9px] text-[#71717a]">
+              <div className="font-mono text-[9px] text-[var(--text-muted)]">
                 {(constituencyTip.district || "—") + ", " + (constituencyTip.state || "")}
               </div>
-              <div className="font-mono text-[9px] text-[#52525b]">
+              <div className="font-mono text-[9px] text-[var(--text-secondary)]">
                 VOL {(Number(constituencyTip.volatility_score) || 0).toFixed(0)}% · PH-{constituencyTip.phase ?? "—"}
               </div>
-              <div className="font-mono text-[8px] text-[#a1a1aa] pt-0.5 border-t border-zinc-100">Click dot or label → intel filter</div>
+              <div className="font-mono text-[8px] text-[var(--text-muted)] pt-0.5 border-t border-[color:var(--border)]">Click dot or label → intel filter</div>
             </div>
           ) : (
             tooltipContent

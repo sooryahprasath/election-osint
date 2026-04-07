@@ -82,7 +82,7 @@ export default function RootLayout({
       lang="en"
       className={`${inter.variable} ${jetbrainsMono.variable} h-full`}
     >
-      <body className="h-full overflow-hidden bg-[#f4f4f5] text-[#27272a] antialiased">
+      <body className="h-full overflow-hidden antialiased">
         <LiveDataProvider>
           {children}
         </LiveDataProvider>

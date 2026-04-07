@@ -20,7 +20,7 @@ export default function VolatilityGauge({ score }: VolatilityGaugeProps) {
             key={i}
             className="h-2 flex-1 rounded-sm transition-all"
             style={{
-              backgroundColor: i < filledSegments ? color : "#e4e4e7",
+              backgroundColor: i < filledSegments ? color : "var(--surface-3)",
               opacity: i < filledSegments ? 0.5 + (i / segments) * 0.5 : 1,
             }}
           />
@@ -28,7 +28,7 @@ export default function VolatilityGauge({ score }: VolatilityGaugeProps) {
       </div>
 
       {/* Labels */}
-      <div className="flex justify-between font-mono text-[8px] text-[#71717a]">
+      <div className="flex justify-between font-mono text-[8px] text-[var(--text-muted)]">
         <span>STABLE</span>
         <span>MODERATE</span>
         <span>VOLATILE</span>
