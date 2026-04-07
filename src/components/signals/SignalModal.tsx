@@ -25,7 +25,8 @@ export default function SignalModal({ signal, onClose }: SignalModalProps) {
     const textColor = isSevere ? "text-[#dc2626]" : isModerate ? "text-[#ea580c]" : "text-[#16a34a]";
 
     // Safely parse JSONB data if it exists
-    const bullets = Array.isArray(signal.full_summary) ? signal.full_summary : [];
+    const bulletsRaw = Array.isArray(signal.full_summary) ? signal.full_summary : [];
+    const bullets = bulletsRaw.slice(0, 4); // UI: keep AI summary conservative (max 4 points)
     const entities = Array.isArray(signal.entities_involved) ? signal.entities_involved : [];
 
     const modalContent = (
@@ -114,7 +115,7 @@ export default function SignalModal({ signal, onClose }: SignalModalProps) {
                         {/* Right Col: AI Summary */}
                         <div className="flex-1">
                             <h3 className={`font-mono text-[10px] font-bold tracking-wider mb-3 flex items-center gap-1.5 ${textColor}`}>
-                                <AlertTriangle className="h-3 w-3" /> TACTICAL AI SUMMARY
+                                <AlertTriangle className="h-3 w-3" /> AI SUMMARY
                             </h3>
 
                             {bullets.length > 0 ? (

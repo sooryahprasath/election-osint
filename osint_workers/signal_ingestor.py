@@ -130,7 +130,8 @@ def extract_article_data(url, fallback_html):
     if len(full_text) < 100 and fallback_html:
         full_text = BeautifulSoup(fallback_html, 'html.parser').get_text(separator=' ')
         
-    return full_text[:3000], image_url, final_url
+    # Token-safety: keep ingestion conservative.
+    return full_text[:1400], image_url, final_url
 
 
 def _norm_title(t: str) -> str:
@@ -352,7 +353,7 @@ def analyze_and_insert(source_title, source_url, original_title, full_text, imag
         "constituency_id": "Blank if unknown, else exact internal ID from context if inferable",
         "severity": 1 to 5 integer (4 or 5 for extreme physical violence or major fraud only),
         "verified": true or false,
-        "bullets": ["Bullet 1", "Bullet 2", "Bullet 3"],
+        "bullets": ["Point 1", "Point 2", "Point 3", "Point 4"],
         "latitude": null or decimal degrees if the text implies a specific town/venue in India,
         "longitude": null or decimal degrees (must pair with latitude),
         "geo_confidence": 0.0 to 1.0 how sure you are about lat/long (0 if omitted),
@@ -360,7 +361,10 @@ def analyze_and_insert(source_title, source_url, original_title, full_text, imag
         "video_confidence": 0.0 to 1.0 confidence that a matching video exists,
         "video_query": "Short 3-6 word YouTube search ONLY if video_relevant is true; else empty string"
     }}
-    Rules: Never guess lat/long from state alone. If video_relevant is false, video_query must be "".
+    Rules:
+    - Never guess lat/long from state alone.
+    - bullets MUST be 2 to 4 items, each <= 12 words. No extra commentary.
+    - If video_relevant is false, video_query must be "".
     """
     try:
         response = gemini_client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
@@ -368,7 +372,13 @@ def analyze_and_insert(source_title, source_url, original_title, full_text, imag
         if text.startswith("```json"): text = text[7:-3].strip()
         analysis = json.loads(text)
         
-        short_body = analysis.get("bullets", ["No summary available"])[0]
+        bullets = analysis.get("bullets", []) if isinstance(analysis, dict) else []
+        if not isinstance(bullets, list):
+            bullets = []
+        # Enforce conservative limits even if the model misbehaves.
+        bullets = [str(x).strip() for x in bullets if str(x).strip()]
+        bullets = bullets[:4]
+        short_body = bullets[0] if bullets else "No summary available"
         c_id = analysis.get("constituency_id")
         if c_id not in valid_c_ids:
             c_id = None
@@ -404,7 +414,7 @@ def analyze_and_insert(source_title, source_url, original_title, full_text, imag
             "constituency_id": c_id,
             "severity": severity,
             "verified": analysis.get("verified", False) or (state_context == "Govt_Official"),
-            "full_summary": analysis.get("bullets", []),
+            "full_summary": bullets,
             "category": "official" if state_context == "Govt_Official" else "alert",
         }
         if coords:
