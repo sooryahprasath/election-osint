@@ -67,3 +67,54 @@ export function volatilityColor(score: number): string {
   if (score >= 20) return "#0284c7";
   return "#555555";
 }
+
+/**
+ * Normalize education strings coming from scrapers (MyNeta / ECI).
+ * Protects the UI from accidentally rendering full-page blobs.
+ */
+export function normalizeEducation(raw: unknown): string {
+  const s = String(raw ?? "").replace(/\s+/g, " ").trim();
+  if (!s) return "-";
+
+  // If a whole MyNeta page got stored, extract the education category only.
+  // Example: "... Educational Details Category: Graduate B.Com... Details of PAN ..."
+  const m = s.match(
+    /Educational Details.*?Category:\s*([\s\S]+?)(?:Details of PAN|Details of Criminal Cases|Assets\s*&\s*Liabilities|Disclaimer:|$)/i
+  );
+  if (m?.[1]) {
+    const picked = pickTopEducationLine(m[1]);
+    if (picked) return picked;
+  }
+
+  const m2 = s.match(
+    /\bCategory:\s*([\s\S]+?)(?:Details of PAN|Details of Criminal Cases|Assets\s*&\s*Liabilities|Disclaimer:|$)/i
+  );
+  if (m2?.[1]) {
+    const picked = pickTopEducationLine(m2[1]);
+    if (picked) return picked;
+  }
+
+  // If it looks like a breadcrumb dump, try to keep only a short meaningful tail.
+  if (s.includes("→") || /home\s*→/i.test(s) || s.length > 120) return clampText(s, 64);
+
+  return s;
+}
+
+function clampText(s: string, max: number) {
+  if (s.length <= max) return s;
+  return `${s.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
+}
+
+function pickTopEducationLine(raw: string) {
+  const s = String(raw ?? "").replace(/\s+/g, " ").trim();
+  if (!s) return "";
+
+  // Prefer the category phrase itself (e.g. "Graduate", "Graduate Professional", "10th Pass").
+  // If there are multiple qualifications, keep only the first clause.
+  const first = s
+    .split(/(?:,|;|\||\/|\bDetails\b|\bfrom\b|\byear\b|\bpassed\b|\bUniversity\b|\bCollege\b|\bSchool\b)/i)[0]
+    ?.trim();
+
+  const out = first || s;
+  return clampText(out, 32);
+}

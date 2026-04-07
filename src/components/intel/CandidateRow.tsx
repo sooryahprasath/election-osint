@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertTriangle, GraduationCap, IndianRupee, User } from "lucide-react";
-import { formatIndianCurrency } from "@/lib/utils/formatting";
+import { formatIndianCurrency, normalizeEducation } from "@/lib/utils/formatting";
 
 // Fallback logic to get colors without the old static mock dictionary
 const getPartyColor = (party: string) => {
@@ -17,36 +17,31 @@ interface CandidateRowProps {
 
 export default function CandidateRow({ candidate, onClick, isLeading }: CandidateRowProps) {
   const partyColor = getPartyColor(candidate.party || "IND");
+  const partyLabel = String(candidate.party || "IND");
 
   return (
     <div 
       onClick={onClick}
       className={`px-3 py-2.5 border-b border-[#e4e4e7] transition-colors ${onClick ? 'cursor-pointer hover:bg-[#e4e4e7]/50' : 'hover:bg-[#f4f4f5]'}`}
     >
-      {/* Phone: single row. md+ fixed intel column (~280px): party on its own row so labels are never clipped. */}
-      <div className="mb-1.5 flex flex-row flex-wrap items-center gap-x-2 gap-y-1 md:flex-col md:items-stretch md:gap-1">
+      {/* Consistent row layout (mobile + desktop) */}
+      <div className="mb-1.5 flex flex-col gap-1">
         <div className="flex min-w-0 flex-1 items-center gap-2 md:w-full md:flex-none">
           <div className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: partyColor }} />
           <span className="min-w-0 flex-1 truncate font-mono text-[11px] font-medium text-[#18181b]">
             {candidate.name}
           </span>
-          <span
-            className="shrink-0 rounded px-1.5 py-0.5 font-mono text-[9px] font-bold md:hidden"
-            style={{
-              color: partyColor,
-              backgroundColor: `${partyColor}15`,
-              border: `1px solid ${partyColor}30`,
-            }}
-          >
-            {candidate.party}
+          <span className="shrink-0 rounded border border-[#e4e4e7] bg-[#fafafa] px-1.5 py-0.5 font-mono text-[8px] font-bold text-[#52525b] md:hidden">
+            VOL
           </span>
         </div>
-        <div className="flex w-full flex-wrap items-center gap-1.5 md:pl-[14px]">
+        <div className="flex flex-wrap items-center gap-1.5 pl-[14px]">
           <span
-            className="hidden max-w-full break-words rounded border border-[#e4e4e7] bg-[#fafafa] px-1.5 py-0.5 font-mono text-[9px] font-bold leading-tight text-[#27272a] md:inline-block"
+            title={partyLabel}
+            className="max-w-full rounded border border-[#e4e4e7] bg-[#fafafa] px-1.5 py-0.5 font-mono text-[9px] font-bold leading-tight text-[#27272a]"
             style={{ borderLeftWidth: 3, borderLeftColor: partyColor }}
           >
-            {candidate.party}
+            <span className="block max-w-[235px] truncate md:max-w-[220px]">{partyLabel}</span>
           </span>
           {candidate.removed && (
             <span className="shrink-0 rounded border border-[#e4e4e7] bg-[#f4f4f5] px-1 py-0.5 font-mono text-[8px] font-bold text-[#a1a1aa]">
@@ -62,7 +57,7 @@ export default function CandidateRow({ candidate, onClick, isLeading }: Candidat
       </div>
 
       {/* Stats row */}
-      <div className="flex items-center gap-3 font-mono text-[9px]">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[9px]">
         {/* Age + Gender */}
         <span className="flex items-center gap-1 text-[#52525b]">
           <User className="h-2.5 w-2.5" />
@@ -91,7 +86,7 @@ export default function CandidateRow({ candidate, onClick, isLeading }: Candidat
         {/* Education */}
         <span className="flex items-center gap-1 text-[#71717a]">
           <GraduationCap className="h-2.5 w-2.5" />
-          {candidate.education || "-"}
+          {normalizeEducation(candidate.education)}
         </span>
       </div>
     </div>

@@ -268,6 +268,10 @@ python bulk_seed_constituencies.py
 
 # 2) ECI + MyNeta dossier pass (browser visible by default for Playwright)
 python dossier_ingestor.py
+#    Or:  python dossier_ingestor.py --eci-only
+#         python dossier_ingestor.py --myneta-only
+#         python dossier_ingestor.py --eci-headless
+#         python dossier_ingestor.py --myneta-visible   # show MyNeta Chromium
 
 # 3) Continuous or scheduled signals
 python signal_ingestor.py

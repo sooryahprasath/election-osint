@@ -1,12 +1,14 @@
+import argparse
 import os
 import re
 import time
 import json
 import difflib
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 from supabase import create_client, Client
@@ -35,6 +37,19 @@ except Exception as e:
     print(f"CRITICAL: Supabase offline: {e}")
     supabase = None
 
+# Optional LLM fallback (set DOSSIER_LLM_FALLBACK=1 and GEMINI_API_KEY)
+_DOSSIER_LLM = os.getenv("DOSSIER_LLM_FALLBACK", "").lower() in ("1", "true", "yes")
+_LLM_CALLS = 0
+_LLM_MAX = int(os.getenv("DOSSIER_LLM_MAX_CALLS", "40"))
+_gemini_client = None
+if _DOSSIER_LLM and os.getenv("GEMINI_API_KEY"):
+    try:
+        from google import genai as _genai_mod
+
+        _gemini_client = _genai_mod.Client(api_key=os.getenv("GEMINI_API_KEY"))
+    except Exception as _e:
+        print(f"[dossier] LLM disabled (import/init): {_e}")
+
 
 # ----------------------------
 # CONFIG
@@ -62,51 +77,242 @@ MYNETA_CONFIG = [
 # MATCHING HELPERS
 # ----------------------------
 def clean_full_name(name: str) -> str:
+    """Aggressive normalization for ledger dedupe keys (may drop initials)."""
     name = (name or "").lower()
     name = re.sub(r"\b(adv|dr|prof|mrs|mr|shri|smt)\b\.?", " ", name)
-    name = re.sub(r"\b[swd]/o\b.*$", " ", name)
+    # Strip relationship suffixes even when written with spaces (S/O, S / O, S O)
+    name = re.sub(r"\b([sdw])\s*/?\s*o\b.*$", " ", name)
     name = re.sub(r"[^\w\s@]", " ", name)  # keep @ for alias checking
     name = re.sub(r"\b[a-z]\b", " ", name)
     return " ".join(name.split())
 
-def get_core_word(name: str) -> str:
-    words = clean_full_name(name).split()
+
+def name_alias_parts(name: str) -> list[str]:
+    """Split on @ or 'Alias' (Indian affidavit / MyNeta patterns)."""
+    n = (name or "").strip()
+    if not n:
+        return []
+    parts = re.split(r"\s*@\s*|\b[Aa]lias\b", n)
+    return [p.strip() for p in parts if p.strip()]
+
+
+def squish_alpha(s: str) -> str:
+    """Collapse for fuzzy compare: T. I. X -> tix; handles periods and spaces."""
+    x = (s or "").lower()
+    x = re.sub(r"([a-z])\.(?=\s|$)", r"\1 ", x)
+    x = re.sub(r"[.\s\-_]+", "", x)
+    return re.sub(r"[^a-z]", "", x)
+
+
+def name_similarity(a: str, b: str) -> float:
+    """0–1 score; checks each alias segment on both sides."""
+    best = 0.0
+    parts_a = name_alias_parts(a) or [a]
+    parts_b = name_alias_parts(b) or [b]
+    for pa in parts_a:
+        sa = squish_alpha(pa)
+        if len(sa) < 2:
+            continue
+        for pb in parts_b:
+            sb = squish_alpha(pb)
+            if len(sb) < 2:
+                continue
+            best = max(best, SequenceMatcher(None, sa, sb).ratio())
+    return best
+
+
+def clean_full_name_overlap(name: str) -> str:
+    """Token overlap on names: keep single-letter tokens (initials)."""
+    name = (name or "").lower()
+    name = re.sub(r"\b(adv|dr|prof|mrs|mr|shri|smt)\b\.?", " ", name)
+    name = re.sub(r"\b([sdw])\s*/?\s*o\b.*$", " ", name)
+    name = re.sub(r"[^\w\s@]", " ", name)
+    return " ".join(name.split())
+
+
+def overlap_tokens(name: str) -> set[str]:
+    """Meaningful tokens + merged single-letter runs (A K M -> akm)."""
+    raw = clean_full_name_overlap(name)
+    toks: set[str] = set()
+    for segment in re.split(r"\s*@\s*|\b[Aa]lias\b", raw):
+        seg = segment.strip()
+        if not seg:
+            continue
+        words = seg.split()
+        i = 0
+        while i < len(words):
+            if len(words[i]) == 1 and words[i].isalpha():
+                j = i
+                while j < len(words) and len(words[j]) == 1 and words[j].isalpha():
+                    j += 1
+                chunk = "".join(words[i:j])
+                if chunk:
+                    toks.add(chunk)
+                i = j
+            else:
+                w = words[i]
+                if len(w) >= 2:
+                    toks.add(w)
+                i += 1
+    return toks
+
+
+def calculate_token_overlap_v2(name1: str, name2: str) -> float:
+    s1, s2 = overlap_tokens(name1), overlap_tokens(name2)
+    if not s1 or not s2:
+        return 0.0
+    inter = s1.intersection(s2)
+    return len(inter) / min(len(s1), len(s2))
+
+
+def get_core_word_v2(name: str) -> str:
+    words = [w for w in clean_full_name_overlap(name).split() if len(w) > 1]
     return max(words, key=len) if words else ""
 
-def calculate_token_overlap(name1: str, name2: str) -> float:
-    set1 = set(clean_full_name(name1).split())
-    set2 = set(clean_full_name(name2).split())
-    if not set1 or not set2:
-        return 0.0
-    overlap = set1.intersection(set2)
-    return len(overlap) / min(len(set1), len(set2))
 
 def intelligent_match(target: str, options: list[str]) -> str | None:
-    target_clean = clean_full_name(target)
-    options_clean = [clean_full_name(o) for o in options]
+    if not options or not (target or "").strip():
+        return None
+
+    # Tier 0: squished / alias-aware string similarity (initials, T.I. vs T I, @ vs Alias)
+    best_idx = None
+    best_sim = 0.0
+    for idx, opt in enumerate(options):
+        sim = name_similarity(target, opt)
+        if sim > best_sim:
+            best_sim = sim
+            best_idx = idx
+    if best_idx is not None and best_sim >= 0.86:
+        return options[best_idx]
+
+    target_clean = clean_full_name_overlap(target)
+    options_clean = [clean_full_name_overlap(o) for o in options]
 
     target_aliases = [target_clean]
     if "alias" in target_clean or "@" in target_clean:
         target_aliases = re.split(r"\balias\b|@", target_clean)
-        target_aliases = [a.strip() for a in target_aliases if len(a.strip()) > 3]
+        target_aliases = [a.strip() for a in target_aliases if len(a.strip()) > 1]
 
     for alias in target_aliases:
-        # Tier 1: token overlap
-        for idx, opt_clean in enumerate(options_clean):
-            if calculate_token_overlap(alias, opt_clean) >= 0.6:
+        for idx, opt in enumerate(options):
+            if calculate_token_overlap_v2(alias, opt) >= 0.55:
                 return options[idx]
 
-        # Tier 2: core word
-        alias_core = get_core_word(alias)
-        if alias_core and len(alias_core) > 4:
+        alias_core = get_core_word_v2(alias)
+        if alias_core and len(alias_core) > 3:
             for idx, opt in enumerate(options):
-                if get_core_word(opt) == alias_core:
+                if get_core_word_v2(opt) == alias_core:
                     return options[idx]
 
-    # Tier 3: difflib
-    matches = difflib.get_close_matches(target_clean, options_clean, n=1, cutoff=0.65)
+    matches = difflib.get_close_matches(target_clean, options_clean, n=1, cutoff=0.58)
     if matches:
         return options[options_clean.index(matches[0])]
+
+    if best_idx is not None and best_sim >= 0.78:
+        return options[best_idx]
+    return None
+
+
+def best_constituency_name_match(raw: str, db_names: list[str]) -> str | None:
+    """
+    Map ECI / MyNeta constituency labels to an exact DB constituency name
+    (e.g. Manjeshwaram vs MANJESHWAR, Kadirkamam vs KADIRGAMAM).
+    """
+    if not raw or not db_names:
+        return None
+    raw_l = raw.strip().lower()
+    raw_sq = re.sub(r"[^a-z]", "", raw_l)
+
+    best: str | None = None
+    best_score = 0.0
+
+    for n in db_names:
+        nl = (n or "").strip().lower()
+        if not nl:
+            continue
+        n_sq = re.sub(r"[^a-z]", "", nl)
+        r1 = SequenceMatcher(None, raw_l, nl).ratio()
+        r2 = SequenceMatcher(None, raw_sq, n_sq).ratio() if raw_sq and n_sq else 0.0
+        # prefix / truncated variant (e.g. Manjeshwar ⊂ Manjeshwaram)
+        r3 = 0.0
+        shorter, longer = (raw_sq, n_sq) if len(raw_sq) <= len(n_sq) else (n_sq, raw_sq)
+        if len(shorter) >= 6 and shorter != longer and longer.startswith(shorter):
+            r3 = len(shorter) / len(longer) * 0.98
+        sc = max(r1, r2, r3)
+        if sc > best_score:
+            best_score = sc
+            best = n
+
+    if best_score >= 0.74:
+        return best
+
+    # Token overlap on long tokens (≥4 chars)
+    raw_toks = {t for t in re.split(r"\W+", raw_l) if len(t) >= 4}
+    if raw_toks:
+        cand2: str | None = None
+        sc2 = 0.0
+        for n in db_names:
+            nl = (n or "").strip().lower()
+            nt = {t for t in re.split(r"\W+", nl) if len(t) >= 4}
+            if not nt:
+                continue
+            inter = raw_toks.intersection(nt)
+            if not inter:
+                continue
+            j = len(inter) / max(1, min(len(raw_toks), len(nt)))
+            if j > sc2:
+                sc2 = j
+                cand2 = n
+        if cand2 and sc2 >= 0.5:
+            return cand2
+
+    return best if best_score >= 0.62 else None
+
+
+def find_best_constituency_match(eci_state: str, eci_constituency: str, db_constituencies: list[dict]) -> str | None:
+    state_constituencies = [c for c in db_constituencies if (c.get("state") or "").lower() == (eci_state or "").lower()]
+    if not state_constituencies:
+        return None
+    names = [c["name"] for c in state_constituencies if c.get("name")]
+    hit = best_constituency_name_match(eci_constituency, names)
+    if not hit:
+        return None
+    for c in state_constituencies:
+        if (c.get("name") or "") == hit:
+            return c.get("id")
+    return None
+
+
+def _llm_pick_option(kind: str, query: str, options: list[str]) -> int | None:
+    """Return index into options or None. Bounded by _LLM_MAX per run."""
+    global _LLM_CALLS
+    if not _gemini_client or _LLM_CALLS >= _LLM_MAX or len(options) > 80:
+        return None
+    try:
+        payload = json.dumps({"query": query, "options": options[:80]}, ensure_ascii=False)
+        prompt = f"""You match Indian election {kind} names between two sources (ECI vs MyNeta / DB).
+Given QUERY and a list OPTIONS (exact strings), reply with ONLY a JSON object: {{"pick": <0-based index>}} or {{"pick": null}} if none clearly match.
+Rules: tolerate spelling variants, missing 'm', truncated names, Malayalam/Tamil romanization differences. Same person = pick one index.
+
+{payload}"""
+        _LLM_CALLS += 1
+        resp = _gemini_client.models.generate_content(
+            model=os.getenv("DOSSIER_LLM_MODEL", "gemini-2.5-flash"),
+            contents=prompt,
+        )
+        text = (getattr(resp, "text", None) or "").strip()
+        if text.startswith("```"):
+            text = re.sub(r"^```\w*\s*", "", text)
+            text = re.sub(r"\s*```$", "", text)
+        data = json.loads(text)
+        idx = data.get("pick")
+        if idx is None:
+            return None
+        i = int(idx)
+        if 0 <= i < len(options):
+            return i
+    except Exception as e:
+        print(f"    [LLM] {kind} match failed: {e}")
     return None
 
 
@@ -127,21 +333,6 @@ def clean_currency_to_int(s: str) -> int:
 # ----------------------------
 # ECI SCRAPER (Playwright)
 # ----------------------------
-def find_best_constituency_match(eci_state: str, eci_constituency: str, db_constituencies: list[dict]) -> str | None:
-    state_constituencies = [c for c in db_constituencies if (c.get("state") or "").lower() == (eci_state or "").lower()]
-    if not state_constituencies:
-        return None
-    db_names = [c["name"].lower() for c in state_constituencies if c.get("name")]
-    eci_c_clean = (eci_constituency or "").lower().strip()
-    matches = difflib.get_close_matches(eci_c_clean, db_names, n=1, cutoff=0.5)
-    if matches:
-        best = matches[0]
-        for c in state_constituencies:
-            if (c.get("name") or "").lower() == best:
-                return c.get("id")
-    return None
-
-
 def scrape_and_upsert_eci_candidates(db_constituencies: list[dict], headless: bool = False) -> dict[str, set[str]]:
     """
     Scrape ECI per-state and upsert candidates.
@@ -344,43 +535,71 @@ def mark_removed_candidates(prefix: str, seen_ids: set[str]) -> None:
 # ----------------------------
 # MYNETA ENRICH (Requests + profile parsing)
 # ----------------------------
-def fetch_myneta_summary_rows(base: str, page: int) -> list[dict]:
+def _pick_myneta_summary_candidate_table(soup: BeautifulSoup) -> Tag | None:
     """
+    MyNeta summary pages have multiple tables; the first is a 2-column HIGHLIGHTS block.
+    Pick the table that actually lists candidates (links to candidate.php in column 2).
+    """
+    best_table = None
+    best_hits = 0
+    for table in soup.find_all("table"):
+        hits = 0
+        for tr in table.find_all("tr"):
+            tds = tr.find_all(["td", "th"])
+            if len(tds) < 6:
+                continue
+            link = tds[1].find("a") if len(tds) > 1 else None
+            href = (link.get("href") or "") if link else ""
+            if "candidate.php" in href and "candidate_id=" in href:
+                hits += 1
+        if hits > best_hits:
+            best_hits = hits
+            best_table = table
+    return best_table
+
+
+def fetch_myneta_summary_rows(pw_page, base: str, page: int) -> list[dict]:
+    """
+    Load MyNeta summary in a real browser — the candidate table is JS-rendered; raw HTTP has no rows.
     Returns list of {candidate_name, constituency_name, candidate_id, candidate_url, criminal_cases, education}
     """
     url = f"{base}index.php?action=summary&subAction=candidates_analyzed&sort=candidate&page={page}"
-    r = requests.get(url, timeout=25, headers={"User-Agent": "Mozilla/5.0"})
-    r.raise_for_status()
-    soup = BeautifulSoup(r.text, "html.parser")
-    table = soup.find("table")
+    pw_page.goto(url, wait_until="domcontentloaded", timeout=60000)
+    try:
+        pw_page.wait_for_selector('a[href*="candidate_id="]', timeout=30000)
+    except Exception:
+        pw_page.wait_for_timeout(5000)
+
+    soup = BeautifulSoup(pw_page.content(), "html.parser")
+    table = _pick_myneta_summary_candidate_table(soup)
     if not table:
         return []
 
     rows = []
     for tr in table.find_all("tr"):
         tds = tr.find_all(["td", "th"])
-        if len(tds) < 7:
-            continue
-        # skip header row
-        if tds[0].name == "th":
+        # Sno | Candidate | Constituency | Party | Crime | Education | [Assets] | [Liabilities]
+        if len(tds) < 6:
             continue
 
         cand_link = tds[1].find("a")
         if not cand_link or not cand_link.get("href"):
             continue
+        href_raw = cand_link["href"]
+        if "candidate.php" not in href_raw or "candidate_id=" not in href_raw:
+            continue
 
         cand_name = tds[1].get_text(" ", strip=True)
         const_name = tds[2].get_text(" ", strip=True)
-        criminal_raw = tds[4].get_text(" ", strip=True)
-        edu_raw = tds[5].get_text(" ", strip=True)
+        criminal_raw = tds[4].get_text(" ", strip=True) if len(tds) > 4 else "0"
+        edu_raw = tds[5].get_text(" ", strip=True) if len(tds) > 5 else ""
 
-        href = cand_link["href"]
-        candidate_url = href if href.startswith("http") else f"{base}{href.lstrip('/')}"
+        candidate_url = href_raw if href_raw.startswith("http") else f"{base}{href_raw.lstrip('/')}"
         m = re.search(r"candidate_id=(\d+)", candidate_url)
         cand_id = m.group(1) if m else None
 
         try:
-            criminal_cases = int(criminal_raw) if criminal_raw.isdigit() else 0
+            criminal_cases = int(criminal_raw) if criminal_raw.strip().isdigit() else 0
         except Exception:
             criminal_cases = 0
 
@@ -396,21 +615,12 @@ def fetch_myneta_summary_rows(base: str, page: int) -> list[dict]:
     return rows
 
 
-def fetch_myneta_profile(candidate_url: str) -> dict:
-    """
-    Parse candidate.php profile page for assets/liabilities and better education/crime.
-    This avoids the 'assets as image' issue in summary tables.
-    """
-    r = requests.get(candidate_url, timeout=25, headers={"User-Agent": "Mozilla/5.0"})
-    r.raise_for_status()
-    text = r.text
+def _parse_myneta_profile_html(text: str) -> dict:
+    """Extract assets / liabilities / education / crime from rendered candidate.php HTML."""
     soup = BeautifulSoup(text, "html.parser")
-
-    # Assets & Liabilities appear as a small 2-row table "Assets:" / "Liabilities:"
     assets_value = 0
     liabilities_value = 0
 
-    # Find the first table row that contains "Assets:"
     assets_cell = soup.find(lambda tag: tag.name in ["td", "th"] and "assets:" in tag.get_text(" ", strip=True).lower())
     if assets_cell:
         tr = assets_cell.find_parent("tr")
@@ -425,21 +635,23 @@ def fetch_myneta_profile(candidate_url: str) -> dict:
         if len(tds) >= 2:
             liabilities_value = clean_currency_to_int(tds[1].get_text(" ", strip=True))
 
-    # Education block: "Category: ..."
+    # Education: keep it SHORT and local to the education section.
     education = ""
-    edu_h = soup.find(lambda tag: tag.name in ["h3", "h4", "h5", "h6"] and "educational details" in tag.get_text(" ", strip=True).lower())
-    if edu_h:
-        # next text containing "Category:"
-        cat = soup.find(lambda tag: tag.name in ["p", "div"] and "category:" in tag.get_text(" ", strip=True).lower())
-        if cat:
-            education = cat.get_text(" ", strip=True)
+    m = re.search(
+        r"Educational Details.*?Category:\s*([^\n<]+)",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if m:
+        education = m.group(1).strip()
     if not education:
-        # fallback: search raw html
-        m = re.search(r"Category:\s*([^<\n]+)", text, re.IGNORECASE)
-        if m:
-            education = m.group(0).strip()
+        m2 = re.search(r"\bCategory:\s*([^\n<]+)", text, re.IGNORECASE)
+        if m2:
+            education = m2.group(1).strip()
+    # Guardrail: if something huge slips through, drop it.
+    if education and len(education) > 120:
+        education = education[:120].strip()
 
-    # Crime cases: "Number of Criminal Cases: X" or "No criminal cases"
     criminal_cases = None
     m = re.search(r"Number of Criminal Cases:\s*(\d+)", text, re.IGNORECASE)
     if m:
@@ -455,10 +667,122 @@ def fetch_myneta_profile(candidate_url: str) -> dict:
     }
 
 
-def enrich_candidates_from_myneta() -> None:
+def fetch_myneta_profile(candidate_url: str, pw_page) -> dict:
+    """
+    Profile pages are also JS-heavy; load with the same Playwright page used for summaries.
+    """
+    pw_page.goto(candidate_url, wait_until="domcontentloaded", timeout=60000)
+    try:
+        pw_page.wait_for_selector("td", timeout=20000)
+    except Exception:
+        pw_page.wait_for_timeout(3000)
+    return _parse_myneta_profile_html(pw_page.content())
+
+
+def _sanitize_education_blob(raw: str) -> str:
+    """
+    Some runs accidentally stored a full MyNeta HTML/text dump into candidates.education.
+    Recover the short 'Category:' value if present; otherwise return empty string (so UI shows '-').
+    """
+    if not raw:
+        return ""
+    s = " ".join(str(raw).split())
+    if not s:
+        return ""
+    # Prefer the education category value and stop before PAN/ITR/Criminal/Assets sections.
+    m = re.search(
+        r"Educational Details.*?Category:\s*(.+?)(?:Details of PAN|Details of Criminal Cases|Assets\s*&\s*Liabilities|Disclaimer:|$)",
+        s,
+        re.IGNORECASE,
+    )
+    if m:
+        return " ".join(m.group(1).split()).strip()[:120]
+    m2 = re.search(
+        r"\bCategory:\s*(.+?)(?:Details of PAN|Details of Criminal Cases|Assets\s*&\s*Liabilities|Disclaimer:|$)",
+        s,
+        re.IGNORECASE,
+    )
+    if m2:
+        return " ".join(m2.group(1).split()).strip()[:120]
+    # If it's a huge blob without a category, drop it.
+    if len(s) > 140:
+        return ""
+    return s[:120]
+
+
+def cleanup_bad_education_fields(*, dry_run: bool = False) -> int:
+    """
+    Fix already-corrupted rows in Supabase where education contains full page dumps.
+    Returns number of rows updated.
+    """
+    if not supabase:
+        return 0
+
+    print("\n[+] Cleanup: sanitizing corrupted candidates.education fields...", flush=True)
+    updated = 0
+
+    # PostgREST often caps to 1000 rows per request; paginate.
+    print("    [..] Fetching candidates (id, education)...", flush=True)
+    rows: list[dict] = []
+    step = 1000
+    start = 0
+    hard_cap = 15000
+    while start < hard_cap:
+        end = min(start + step - 1, hard_cap - 1)
+        res = supabase.table("candidates").select("id, education").range(start, end).execute()
+        batch = res.data or []
+        rows.extend(batch)
+        if len(batch) < step:
+            break
+        start += step
+    print(f"    [..] Loaded {len(rows)} candidate rows.", flush=True)
+    bad = []
+    for idx, r in enumerate(rows, start=1):
+        edu = r.get("education") or ""
+        s = str(edu)
+        su = s.upper()
+        looks_like_dump = (
+            ("→" in s)
+            or ("HOME" in su and "2026" in su)
+            or ("DETAILS OF PAN" in su)
+            or ("DATA READABILITY REPORT" in su)
+            or (len(s) > 220)
+        )
+        if looks_like_dump:
+            fixed = _sanitize_education_blob(s)
+            if fixed != s:
+                bad.append({"id": r["id"], "education": fixed})
+        if idx % 2500 == 0:
+            print(f"    [..] Scanned {idx}/{len(rows)} rows...", flush=True)
+
+    if not bad:
+        print("    [OK] No corrupted education fields detected.")
+        return 0
+
+    print(f"    [~] Detected {len(bad)} corrupted rows.", flush=True)
+    if dry_run:
+        print("    [dry-run] Not writing changes.")
+        return 0
+
+    # Update row-by-row to avoid accidental NULLing on strict schemas.
+    for i, row in enumerate(bad, start=1):
+        supabase.table("candidates").update({"education": row["education"]}).eq("id", row["id"]).execute()
+        updated += 1
+        if i % 50 == 0:
+            print(f"    [..] Updated {i}/{len(bad)} rows...", flush=True)
+
+    print(f"    [OK] Updated {updated} rows.", flush=True)
+    return updated
+
+
+def enrich_candidates_from_myneta(*, headless: bool = True) -> None:
     if not supabase:
         return
-    print("\n[+] MyNeta: enriching candidates (profile-based extraction)...")
+    print("\n[+] MyNeta: enriching candidates (Playwright - summary + profiles are JS-rendered)...", flush=True)
+    if _gemini_client:
+        print(
+            f"    [~] LLM fallback enabled (max {_LLM_MAX} calls, model={os.getenv('DOSSIER_LLM_MODEL', 'gemini-2.5-flash')})"
+        )
 
     # fetch baseline mapping
     cands_res = supabase.table("candidates").select("id, name, constituency_id").eq("removed", False).execute()
@@ -466,105 +790,197 @@ def enrich_candidates_from_myneta() -> None:
     const_res = supabase.table("constituencies").select("id, name, state").execute()
     db_constituencies = const_res.data or []
 
-    for cfg in MYNETA_CONFIG:
-        state_name = cfg["name"]
-        prefix = cfg["prefix"]
-        base = cfg["base"]
-        pages = cfg["pages"]
+    from playwright.sync_api import sync_playwright
 
-        state_db_consts = {c["id"]: c["name"] for c in db_constituencies if (c.get("id") or "").startswith(prefix)}
-        state_db_cands = [c for c in db_candidates if (c.get("constituency_id") or "").startswith(prefix)]
+    print(f"    [..] Launching Chromium (headless={headless})...", flush=True)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=headless)
+        ctx = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 900},
+        )
+        pw_page = ctx.new_page()
 
-        print(f"\n======================================")
-        print(f" MYNETA TARGET: {state_name.upper()} (pages {pages})")
-        print(f"======================================")
+        for cfg in MYNETA_CONFIG:
+            state_name = cfg["name"]
+            prefix = cfg["prefix"]
+            base = cfg["base"]
+            pages = cfg["pages"]
 
-        merged = 0
-        unresolved = 0
+            state_db_consts = {c["id"]: c["name"] for c in db_constituencies if (c.get("id") or "").startswith(prefix)}
+            state_db_cands = [c for c in db_candidates if (c.get("constituency_id") or "").startswith(prefix)]
 
-        for page in range(1, pages + 1):
-            print(f" -> Summary page {page}/{pages}")
-            try:
-                rows = fetch_myneta_summary_rows(base, page)
-            except Exception as e:
-                print(f"    [!] Failed summary page {page}: {e}")
-                continue
+            print(f"\n======================================", flush=True)
+            print(f" MYNETA TARGET: {state_name.upper()} (pages {pages})", flush=True)
+            print(f"======================================", flush=True)
 
-            for row in rows:
-                const_name_raw = row["constituency_name"]
-                cand_name_raw = row["candidate_name"]
-                mynet_url = row["myneta_url"]
-                mynet_cid = row["myneta_candidate_id"]
+            merged = 0
+            unresolved = 0
 
-                matched_const_name = intelligent_match(const_name_raw, list(state_db_consts.values()))
-                if not matched_const_name:
-                    unresolved += 1
-                    continue
-
-                constituency_id = next(k for k, v in state_db_consts.items() if v == matched_const_name)
-                cands_in_const = [c for c in state_db_cands if c["constituency_id"] == constituency_id]
-                if not cands_in_const:
-                    unresolved += 1
-                    continue
-
-                matched_cand_name = intelligent_match(cand_name_raw, [c["name"] for c in cands_in_const])
-                if not matched_cand_name:
-                    unresolved += 1
-                    continue
-
-                target_cand_id = next(c["id"] for c in cands_in_const if c["name"] == matched_cand_name)
-
-                # always parse profile page for assets/liabilities (fixes image/JS cases)
+            for page in range(1, pages + 1):
+                print(f" -> Summary page {page}/{pages}", flush=True)
                 try:
-                    prof = fetch_myneta_profile(mynet_url)
-                except Exception:
-                    prof = {}
+                    rows = fetch_myneta_summary_rows(pw_page, base, page)
+                except Exception as e:
+                    print(f"    [!] Failed summary page {page}: {e}")
+                    continue
 
-                criminal_cases = prof.get("criminal_cases")
-                if criminal_cases is None:
-                    criminal_cases = row.get("criminal_cases", 0)
+                if not rows:
+                    print(f"    [!] 0 rows parsed on page {page} — check MyNeta layout or network", flush=True)
 
-                education = prof.get("education_detail") or row.get("education") or ""
+                for row in rows:
+                    const_name_raw = row["constituency_name"]
+                    cand_name_raw = row["candidate_name"]
+                    mynet_url = row["myneta_url"]
+                    mynet_cid = row["myneta_candidate_id"]
 
-                payload = {
-                    "criminal_cases": criminal_cases,
-                    "education": education,
-                    "assets_value": prof.get("assets_value", 0),
-                    "liabilities_value": prof.get("liabilities_value", 0),
-                    "myneta_url": mynet_url,
-                    "myneta_candidate_id": mynet_cid,
-                    "myneta_last_synced_at": _utc_now_iso(),
-                    "background": f"Data verified via ADR MyNeta. Candidate holds {prof.get('assets_value', 0)} INR in declared assets.",
-                }
+                    const_name_list = sorted(set(state_db_consts.values()))
+                    matched_const_name = best_constituency_name_match(const_name_raw, const_name_list)
+                    if not matched_const_name and _gemini_client:
+                        li = _llm_pick_option("constituency", const_name_raw, const_name_list)
+                        if li is not None:
+                            matched_const_name = const_name_list[li]
+                    if not matched_const_name:
+                        unresolved += 1
+                        continue
 
-                supabase.table("candidates").update(payload).eq("id", target_cand_id).execute()
-                merged += 1
+                    constituency_id = next((k for k, v in state_db_consts.items() if v == matched_const_name), None)
+                    if not constituency_id:
+                        unresolved += 1
+                        continue
+                    cands_in_const = [c for c in state_db_cands if c["constituency_id"] == constituency_id]
+                    if not cands_in_const:
+                        unresolved += 1
+                        continue
 
-            time.sleep(0.4)
+                    cand_names_in_seat = [c["name"] for c in cands_in_const]
+                    matched_cand_name = intelligent_match(cand_name_raw, cand_names_in_seat)
+                    if not matched_cand_name:
+                        best_c = None
+                        best_s = 0.0
+                        for c in cands_in_const:
+                            s = name_similarity(cand_name_raw, c["name"])
+                            if s > best_s:
+                                best_s = s
+                                best_c = c
+                        if best_c is not None and best_s >= 0.82:
+                            matched_cand_name = best_c["name"]
+                    if not matched_cand_name and _gemini_client:
+                        ci = _llm_pick_option("candidate", cand_name_raw, cand_names_in_seat)
+                        if ci is not None:
+                            matched_cand_name = cand_names_in_seat[ci]
+                    if not matched_cand_name:
+                        unresolved += 1
+                        continue
 
-        print(f"    [✓] Enriched: {merged} | Unresolved: {unresolved}")
+                    target_cand = next((c for c in cands_in_const if c["name"] == matched_cand_name), None)
+                    if not target_cand:
+                        unresolved += 1
+                        continue
+                    target_cand_id = target_cand["id"]
+
+                    try:
+                        prof = fetch_myneta_profile(mynet_url, pw_page)
+                    except Exception:
+                        prof = {}
+
+                    criminal_cases = prof.get("criminal_cases")
+                    if criminal_cases is None:
+                        criminal_cases = row.get("criminal_cases", 0)
+
+                    education = prof.get("education_detail") or row.get("education") or ""
+
+                    payload = {
+                        "criminal_cases": criminal_cases,
+                        "education": education,
+                        "assets_value": prof.get("assets_value", 0),
+                        "liabilities_value": prof.get("liabilities_value", 0),
+                        "myneta_url": mynet_url,
+                        "myneta_candidate_id": mynet_cid,
+                        "myneta_last_synced_at": _utc_now_iso(),
+                        "background": f"Data verified via ADR MyNeta. Candidate holds {prof.get('assets_value', 0)} INR in declared assets.",
+                    }
+
+                    supabase.table("candidates").update(payload).eq("id", target_cand_id).execute()
+                    merged += 1
+
+                time.sleep(0.4)
+
+            print(f"    [OK] Enriched: {merged} | Unresolved: {unresolved}", flush=True)
+
+        ctx.close()
+        browser.close()
 
 
-def main():
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Dossier pipeline: ECI affidavit scrape + MyNeta enrichment.",
+    )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--eci-only",
+        action="store_true",
+        help="Only scrape ECI and mark removed candidates (no MyNeta).",
+    )
+    mode.add_argument(
+        "--myneta-only",
+        action="store_true",
+        help="Only run MyNeta enrichment (expects candidates already in Supabase).",
+    )
+    parser.add_argument(
+        "--eci-headless",
+        action="store_true",
+        help="Run ECI Playwright in headless mode (default: visible browser).",
+    )
+    parser.add_argument(
+        "--myneta-visible",
+        action="store_true",
+        help="Show Chromium for MyNeta pages (default: headless).",
+    )
+    parser.add_argument(
+        "--cleanup-education",
+        action="store_true",
+        help="Sanitize corrupted candidates.education blobs in Supabase before running (safe).",
+    )
+    parser.add_argument(
+        "--cleanup-dry-run",
+        action="store_true",
+        help="Detect corrupted education blobs but do not write changes (use with --cleanup-education).",
+    )
+    args = parser.parse_args()
+
     if not supabase:
         print("CRITICAL: Supabase offline.")
         return
 
-    # load constituencies
+    if args.myneta_only:
+        print("[mode] MyNeta enrichment only\n")
+        if args.cleanup_education:
+            cleanup_bad_education_fields(dry_run=args.cleanup_dry_run)
+        enrich_candidates_from_myneta(headless=not args.myneta_visible)
+        print("\n[OK] MYNETA SYNC COMPLETE.")
+        return
+
     c_res = supabase.table("constituencies").select("id, name, state").execute()
     db_constituencies = c_res.data or []
     if not db_constituencies:
         print("CRITICAL: constituencies table is empty.")
         return
 
-    seen_map = scrape_and_upsert_eci_candidates(db_constituencies, headless=False)
+    seen_map = scrape_and_upsert_eci_candidates(db_constituencies, headless=args.eci_headless)
     for state in ECI_STATE_CONFIG:
         prefix = state["prefix"]
         seen = seen_map.get(prefix, set())
         mark_removed_candidates(prefix, seen)
 
-    enrich_candidates_from_myneta()
-    print("\n[✓] DOSSIER PIPELINE COMPLETE.")
+    if args.eci_only:
+        print("\n[OK] ECI SYNC COMPLETE (--eci-only; skipped MyNeta).")
+        return
+
+    if args.cleanup_education:
+        cleanup_bad_education_fields(dry_run=args.cleanup_dry_run)
+    enrich_candidates_from_myneta(headless=not args.myneta_visible)
+    print("\n[OK] FULL DOSSIER PIPELINE COMPLETE (ECI + MyNeta).")
 
 
 if __name__ == "__main__":

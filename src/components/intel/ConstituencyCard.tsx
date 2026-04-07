@@ -19,6 +19,7 @@ export default function ConstituencyCard({ constituency }: ConstituencyCardProps
   const totalWealth = candidates.reduce((sum, c) => sum + (c.assets_value || 0), 0);
   const totalCriminal = candidates.filter((c) => c.criminal_cases && c.criminal_cases > 0).length;
   const [activeCandidate, setActiveCandidate] = useState<any | null>(null);
+  const sortedCandidates = [...candidates].sort((a, b) => (b.assets_value || 0) - (a.assets_value || 0));
 
   return (
     <div className="flex flex-col gap-0">
@@ -99,16 +100,15 @@ export default function ConstituencyCard({ constituency }: ConstituencyCardProps
       </div>
 
       {/* Candidates */}
-      <div className="px-3 py-2 border-b border-[#e4e4e7]">
-        <span className="font-mono text-[10px] text-[#52525b] tracking-wider">
-          ◆ CANDIDATE MANIFEST ({candidates.length})
+      <div className="px-3 py-2 border-b border-[#e4e4e7] flex items-center justify-between gap-2 bg-[#fafafa]">
+        <span className="font-mono text-[10px] font-bold text-[#52525b] tracking-wider">
+          ◆ CANDIDATE MANIFEST
         </span>
+        <span className="font-mono text-[9px] text-[#71717a]">{candidates.length} total</span>
       </div>
       <div className="flex flex-col">
         {candidates.length > 0 ? (
-          candidates
-            .sort((a, b) => (b.assets_value || 0) - (a.assets_value || 0))
-            .map((candidate) => (
+          sortedCandidates.map((candidate) => (
               <CandidateRow
                 key={candidate.id}
                 candidate={candidate}
@@ -125,6 +125,7 @@ export default function ConstituencyCard({ constituency }: ConstituencyCardProps
       {activeCandidate && (
         <CandidateModal
           candidate={activeCandidate}
+          constituency={constituency}
           onClose={() => setActiveCandidate(null)}
         />
       )}

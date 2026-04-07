@@ -98,6 +98,26 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
 
   const selectedConstituency = globalConstituencyId ? constituencies.find((c: any) => c.id === globalConstituencyId) || null : null;
 
+  const candCountBySeat = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const c of candidates as any[]) {
+      const k = String(c.constituency_id || "");
+      if (!k) continue;
+      m.set(k, (m.get(k) || 0) + 1);
+    }
+    return m;
+  }, [candidates]);
+
+  const crimCountBySeat = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const c of candidates as any[]) {
+      const k = String(c.constituency_id || "");
+      if (!k) continue;
+      if ((c.criminal_cases || 0) > 0) m.set(k, (m.get(k) || 0) + 1);
+    }
+    return m;
+  }, [candidates]);
+
   if (selectedConstituency) {
     return (
       <aside className="flex min-h-0 flex-1 flex-col w-full overflow-hidden bg-[#ffffff] border-l border-[#e4e4e7]">
@@ -115,12 +135,12 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
 
   return (
     <aside className="flex min-h-0 flex-1 flex-col w-full overflow-hidden bg-[#ffffff] border-l border-[#e4e4e7]">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-[#e4e4e7] shrink-0">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-[#e4e4e7] shrink-0 bg-white">
         <div className="flex items-center gap-2">
           <Filter className="h-3.5 w-3.5 text-[#0284c7]" />
           <span className="font-mono text-xs font-bold text-[#0284c7] tracking-wider">INTEL PANE</span>
         </div>
-        <span className="font-mono text-[10px] text-[#71717a]">{sorted.length} RESULTS</span>
+        <span className="font-mono text-[10px] text-[#71717a]">{sorted.length} seats</span>
       </div>
 
       <div className="flex border-b border-[#e4e4e7] overflow-x-auto shrink-0 bg-[#f8fafc]">
@@ -217,12 +237,12 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
         <PhaseTimeline />
       </div>
 
-      <div className="px-2 py-1.5 border-b border-[#e4e4e7] shrink-0 flex flex-col gap-1.5 bg-[#f8fafc]">
+      <div className="px-2 py-2 border-b border-[#e4e4e7] shrink-0 flex flex-col gap-2 bg-[#f8fafc]">
         <div className="flex items-center gap-1.5 px-2 py-1 bg-white border border-[#e4e4e7] rounded text-[10px]">
           <Search className="h-3 w-3 text-[#71717a] shrink-0" />
           <input type="text" placeholder="Search candidate or constituency..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="flex-1 bg-transparent text-[#27272a] placeholder-[#a1a1aa] outline-none font-mono text-[10px]" />
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1.5">
           <Filter className="h-2.5 w-2.5 text-[#71717a] shrink-0 ml-1" />
           <select value={partyFilter} onChange={(e) => setPartyFilter(e.target.value)} className="flex-1 bg-white border border-[#e4e4e7] rounded px-1 py-1 font-mono text-[9px] font-bold text-[#52525b] outline-none">
             <option value="ALL">ALL PARTIES</option>
@@ -235,7 +255,7 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y pb-20 max-md:pb-28">
-        <div className="px-2 py-1.5 flex justify-between items-center bg-[#f4f4f5] border-b border-[#e4e4e7]">
+        <div className="sticky top-0 z-10 px-2 py-2 flex justify-between items-center bg-[#f4f4f5]/95 backdrop-blur border-b border-[#e4e4e7]">
           <span className="font-mono text-[8px] text-[#71717a] tracking-wider flex items-center gap-1">
             SORT METRIC
             <IntelHelpTip label="What is volatility?">
@@ -276,17 +296,21 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
                 setGlobalConstituencyId(c.id);
               }
             }}
-            className="flex items-center w-full px-3 py-2 hover:bg-[#f4f4f5] transition-colors border-b border-[#ffffff] group text-left"
+            className="flex items-center w-full px-3 py-2.5 hover:bg-[#f4f4f5] transition-colors border-b border-[#f4f4f5] group text-left"
           >
             <div className="h-6 w-1 rounded-full mr-2.5 shrink-0" style={{ backgroundColor: (c.volatility_score || 0) >= 70 ? "#dc2626" : (c.volatility_score || 0) >= 40 ? "#ea580c" : "#16a34a" }} />
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center justify-between gap-2">
                 <span className="font-mono text-[10px] text-[#27272a] truncate group-hover:text-[#16a34a] transition-colors">{c.name}</span>
                 <span className="font-mono text-[8px] text-[#71717a] shrink-0">#{c.id?.split('-')[1] || "0"}</span>
               </div>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className="font-mono text-[8px] text-[#71717a]">VOL: {(c.volatility_score || 0).toFixed(0)}%</span>
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="font-mono text-[8px] text-[#71717a]">VOL {(c.volatility_score || 0).toFixed(0)}%</span>
                 <span className="font-mono text-[8px] text-[#71717a]">PH-{c.phase}</span>
+                <span className="font-mono text-[8px] text-[#71717a]">{candCountBySeat.get(String(c.id)) || 0} cands</span>
+                <span className={`font-mono text-[8px] ${(crimCountBySeat.get(String(c.id)) || 0) > 0 ? "text-[#dc2626]" : "text-[#16a34a]"}`}>
+                  {(crimCountBySeat.get(String(c.id)) || 0) > 0 ? `${crimCountBySeat.get(String(c.id))} crim` : "clean"}
+                </span>
               </div>
             </div>
             <ChevronRight className="h-3 w-3 text-[#333] group-hover:text-[#71717a] shrink-0 transition-colors" />

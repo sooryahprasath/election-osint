@@ -1,160 +1,366 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { X, User, IndianRupee, AlertTriangle, GraduationCap, MapPin, Search, ExternalLink, Activity } from "lucide-react";
-import { formatIndianCurrency } from "@/lib/utils/formatting";
+import {
+  X,
+  User,
+  IndianRupee,
+  AlertTriangle,
+  GraduationCap,
+  MapPin,
+  Search,
+  ExternalLink,
+  Activity,
+  Scale,
+  Shield,
+  Calendar,
+  Link2,
+  Building2,
+  BadgeCheck,
+} from "lucide-react";
+import { formatIndianCurrency, normalizeEducation } from "@/lib/utils/formatting";
 import { useLiveData } from "@/lib/context/LiveDataContext";
 
-// FIX: Added template literal backticks so the color generates correctly without crashing!
 const getPartyColor = (party: string) => {
-  const hash = party.split('').reduce((acc, char) => char.charCodeAt(0) + ((acc << 5) - acc), 0);
-  return `hsl(${hash % 360}, 70%, 50%)`;
+  const hash = party.split("").reduce((acc, char) => char.charCodeAt(0) + ((acc << 5) - acc), 0);
+  return `hsl(${hash % 360}, 70%, 45%)`;
 };
 
-export default function CandidateModal({ candidate, onClose }: { candidate: any; onClose: () => void; }) {
+export type CandidateModalConstituency = {
+  id?: string;
+  name?: string;
+  state?: string;
+  district?: string;
+  phase?: number;
+  reservation?: string;
+  electorate?: number;
+};
+
+function fmtIso(iso?: string | null) {
+  if (!iso) return null;
+  const d = Date.parse(iso);
+  if (Number.isNaN(d)) return iso;
+  return new Date(d).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+}
+
+export default function CandidateModal({
+  candidate,
+  constituency,
+  onClose,
+}: {
+  candidate: any;
+  /** Seat context — shown prominently in the dossier header. */
+  constituency?: CandidateModalConstituency | null;
+  onClose: () => void;
+}) {
   const [mounted, setMounted] = useState(false);
   const [imgError, setImgError] = useState(false);
-  const { signals } = useLiveData();
+  const { signals, constituencies } = useLiveData();
+
+  const seat =
+    constituency ||
+    constituencies.find((c: any) => c.id === candidate.constituency_id) ||
+    null;
 
   useEffect(() => {
     setMounted(true);
     document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = "auto"; };
+    return () => {
+      document.body.style.overflow = "auto";
+    };
   }, []);
 
-  const partyColor = getPartyColor(candidate.party || "IND");
-  const partyName = candidate.party || "IND";
-  const candidateSignals = signals.filter((s: any) => s.constituency_id === candidate.constituency_id).slice(0, 3);
+  const partyColor = candidate.party_color || getPartyColor(candidate.party || "IND");
+  const partyName = candidate.party || "Independent";
+  const eciUrl = candidate.eci_affidavit_url || candidate.source_url;
+  const hasMyneta = Boolean(candidate.myneta_url && String(candidate.myneta_url).trim());
+
+  const candidateSignals = signals
+    .filter((s: any) => s.constituency_id === candidate.constituency_id)
+    .slice(0, 5);
 
   const modalContent = (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-fade-in-up">
-      <div className="bg-[#ffffff] border border-[#e4e4e7] rounded-lg shadow-xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[95vh]">
-
-        {/* Header - Reverted to clean OSINT grey */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-[#e4e4e7] shrink-0 bg-[#f4f4f5]">
-          <div className="flex items-center gap-2">
-            <Search className="h-4 w-4 text-[#71717a]" />
-            <span className="font-mono text-xs font-bold text-[#52525b] tracking-wider">
-              DOSSIER FILE: {candidate.id}
-            </span>
-          </div>
-          <button onClick={onClose} className="p-1 hover:bg-[#e4e4e7] rounded transition-colors">
-            <X className="h-4 w-4 text-[#71717a]" />
-          </button>
-        </div>
-
-        {/* Content Body */}
-        <div className="flex-1 overflow-y-auto p-4 flex flex-col md:flex-row gap-6">
-
-          {/* Left Column: Photo */}
-          <div className="flex flex-col gap-4 w-full md:w-1/3 shrink-0">
-            <div className="aspect-[3/4] w-full bg-[#f4f4f5] border border-[#e4e4e7] rounded overflow-hidden relative flex items-center justify-center shadow-inner">
-              {candidate.photo_url && !imgError ? (
-                <img
-                  src={candidate.photo_url}
-                  alt={candidate.name}
-                  className="w-full h-full object-cover z-10 relative"
-                  onError={() => setImgError(true)}
-                />
-              ) : (
-                <User className="h-20 w-20 text-[#d4d4d8] z-10 relative" />
-              )}
-              <div className="absolute inset-0 bg-[linear-gradient(rgba(0,0,0,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,0.03)_1px,transparent_1px)] bg-[size:10px_10px] pointer-events-none" />
-            </div>
-
-            {/* Verify Buttons directly under the photo */}
-            <div className="flex flex-col gap-2 w-full">
-              <a
-                href={candidate.source_url || "#"}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full bg-[#16a34a]/10 text-[#16a34a] border border-[#16a34a]/30 font-mono text-[10px] font-bold px-3 py-2 rounded flex items-center justify-center gap-2 hover:bg-[#16a34a] hover:text-white transition-colors"
+    <div
+      className="fixed inset-0 z-[9999] flex items-end justify-center sm:items-center p-0 sm:p-4 bg-black/55 backdrop-blur-md animate-fade-in-up"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="dossier-title"
+    >
+      <div className="flex max-h-[100dvh] sm:max-h-[95vh] w-full sm:max-w-5xl flex-col overflow-hidden rounded-t-2xl border border-[#e4e4e7] bg-white shadow-2xl sm:rounded-xl">
+        {/* Header — mobile: taller tap target; desktop: compact strip */}
+        <div
+          className="shrink-0 border-b border-[#e4e4e7] bg-gradient-to-r from-[#f8fafc] to-[#f1f5f9] px-4 py-3 sm:py-3.5"
+          style={{ borderLeftWidth: 4, borderLeftColor: partyColor }}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="font-mono text-[9px] font-bold uppercase tracking-[0.2em] text-[#71717a] sm:text-[10px]">
+                Dossier file
+              </p>
+              <h1
+                id="dossier-title"
+                className="mt-0.5 break-words font-mono text-lg font-bold leading-tight text-[#0f172a] sm:text-2xl"
               >
-                <ExternalLink className="h-3 w-3" /> OFFICIAL ECI AFFIDAVIT
-              </a>
-
-              {/* Only show MyNeta button if the link exists in the database */}
-              {candidate.myneta_url && (
-                <a
-                  href={candidate.myneta_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full bg-[#0284c7]/10 text-[#0284c7] border border-[#0284c7]/30 font-mono text-[10px] font-bold px-3 py-2 rounded flex items-center justify-center gap-2 hover:bg-[#0284c7] hover:text-white transition-colors"
-                >
-                  <ExternalLink className="h-3 w-3" /> ADR MYNETA PROFILE
-                </a>
+                {candidate.name}
+              </h1>
+              {seat?.name && (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 rounded-md border border-[#0284c7]/25 bg-[#0284c7]/8 px-2 py-1 font-mono text-[10px] font-bold text-[#0369a1] sm:text-[11px]">
+                    <MapPin className="h-3 w-3 shrink-0" />
+                    <span className="break-words">
+                      {seat.name}
+                      {seat.state ? ` · ${seat.state}` : ""}
+                    </span>
+                  </span>
+                  {seat.phase != null && (
+                    <span className="rounded bg-[#f4f4f5] px-2 py-0.5 font-mono text-[9px] text-[#52525b]">
+                      Phase {seat.phase}
+                    </span>
+                  )}
+                </div>
               )}
-            </div>
-          </div>
-
-          {/* Right Column: Key Details */}
-          <div className="flex-1 flex flex-col">
-            <div className="mb-6">
-              <h1 className="font-mono text-2xl font-bold text-[#18181b] tracking-tight truncate">{candidate.name.toUpperCase()}</h1>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="h-3 w-3 rounded-full shadow-sm" style={{ backgroundColor: partyColor }} />
-                <span className="font-mono text-sm font-semibold text-[#52525b]">{partyName.toUpperCase()}</span>
-                {candidate.is_independent && <span className="ml-2 font-mono text-[10px] font-bold text-[#52525b] bg-[#e4e4e7] px-1.5 py-0.5 rounded border border-[#d4d4d8]">INDEPENDENT</span>}
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span
+                  className="inline-flex max-w-full items-center gap-2 rounded-full border px-2.5 py-1 font-mono text-[10px] font-bold sm:text-xs"
+                  style={{
+                    borderColor: `${partyColor}55`,
+                    backgroundColor: `${partyColor}12`,
+                    color: "#27272a",
+                  }}
+                >
+                  <span className="h-2 w-2 shrink-0 rounded-full shadow-sm" style={{ backgroundColor: partyColor }} />
+                  <span className="truncate">
+                    {candidate.party_abbreviation ? `${candidate.party_abbreviation} · ` : ""}
+                    {partyName}
+                  </span>
+                </span>
+                {candidate.is_independent && (
+                  <span className="rounded border border-[#e4e4e7] bg-[#fafafa] px-2 py-0.5 font-mono text-[9px] font-bold text-[#52525b]">
+                    INDEPENDENT
+                  </span>
+                )}
+                {candidate.incumbent && (
+                  <span className="rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-mono text-[9px] font-bold text-emerald-800">
+                    INCUMBENT
+                  </span>
+                )}
                 {candidate.removed && (
-                  <span className="ml-2 font-mono text-[10px] font-bold text-[#a1a1aa] bg-[#f4f4f5] px-1.5 py-0.5 rounded border border-[#e4e4e7]">
+                  <span className="rounded border border-amber-200 bg-amber-50 px-2 py-0.5 font-mono text-[9px] font-bold text-amber-900">
                     REMOVED FROM LATEST ECI LIST
                   </span>
                 )}
               </div>
             </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="shrink-0 rounded-lg p-2 text-[#71717a] transition-colors hover:bg-[#e4e4e7] hover:text-[#18181b]"
+              aria-label="Close dossier"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
 
-            {/* Grid Stats */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-[#f4f4f5] p-3 rounded border border-[#e4e4e7]">
-                <div className="flex items-center gap-1.5 mb-1.5 opacity-60 text-[#27272a]"><User className="h-3 w-3" /><span className="font-mono text-[9px] font-bold tracking-wider">DEMOGRAPHICS</span></div>
-                <div className="font-mono text-lg font-medium text-[#27272a]">{candidate.age || "N/A"} YRS</div>
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
+          {/* Mobile: single column stack. Desktop: photo + main grid */}
+          <div className="flex flex-col gap-4 p-4 lg:flex-row lg:gap-6 lg:p-6">
+            {/* Photo + sources */}
+            <div className="flex w-full flex-col gap-3 lg:w-[220px] lg:shrink-0 xl:w-[240px]">
+              <div className="mx-auto aspect-[3/4] w-full max-w-[200px] overflow-hidden rounded-xl border border-[#e4e4e7] bg-[#f4f4f5] shadow-inner lg:mx-0 lg:max-w-none">
+                {candidate.photo_url && !imgError ? (
+                  <img
+                    src={candidate.photo_url}
+                    alt=""
+                    className="h-full w-full object-cover"
+                    onError={() => setImgError(true)}
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center">
+                    <User className="h-16 w-16 text-[#d4d4d8]" />
+                  </div>
+                )}
               </div>
-              <div className="bg-[#f4f4f5] p-3 rounded border border-[#e4e4e7]">
-                <div className="flex items-center gap-1.5 mb-1.5 opacity-60 text-[#27272a]"><GraduationCap className="h-3 w-3" /><span className="font-mono text-[9px] font-bold tracking-wider">EDUCATION</span></div>
-                <div className="font-mono text-sm font-medium text-[#27272a]">{(candidate.education || "-").toUpperCase()}</div>
+
+              <div className="flex flex-col gap-2">
+                <a
+                  href={eciUrl || "#"}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 font-mono text-[10px] font-bold transition-colors sm:py-2 ${
+                    eciUrl
+                      ? "border-[#16a34a]/35 bg-[#16a34a]/10 text-[#15803d] hover:bg-[#16a34a] hover:text-white"
+                      : "pointer-events-none border-[#e4e4e7] bg-[#f4f4f5] text-[#a1a1aa]"
+                  }`}
+                >
+                  <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                  ECI AFFIDAVIT
+                </a>
+                {hasMyneta ? (
+                  <a
+                    href={candidate.myneta_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-2 rounded-lg border border-[#0284c7]/35 bg-[#0284c7]/10 px-3 py-2.5 font-mono text-[10px] font-bold text-[#0369a1] transition-colors hover:bg-[#0284c7] hover:text-white sm:py-2"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                    ADR MYNETA PROFILE
+                  </a>
+                ) : (
+                  <div className="rounded-lg border border-dashed border-[#e4e4e7] bg-[#fafafa] px-3 py-2.5 text-center font-mono text-[9px] leading-snug text-[#71717a]">
+                    <Link2 className="mx-auto mb-1 h-3.5 w-3.5 text-[#a1a1aa]" />
+                    MyNeta link not linked yet. Re-run dossier ingest after a match is found.
+                  </div>
+                )}
               </div>
-              <div className="bg-[#f4f4f5] p-3 rounded border border-[#e4e4e7]">
-                <div className="flex items-center gap-1.5 mb-1.5 text-[#ea580c] opacity-80"><IndianRupee className="h-3 w-3" /><span className="font-mono text-[9px] font-bold tracking-wider">DECLARED ASSETS</span></div>
-                <div className="font-mono text-lg font-medium text-[#ea580c]">{formatIndianCurrency(candidate.assets_value || 0)}</div>
-              </div>
-              <div className={`p-3 rounded border ${(candidate.criminal_cases || 0) > 0 ? "bg-[#dc2626]/5 border-[#dc2626]/20" : "bg-[#16a34a]/5 border-[#16a34a]/20"}`}>
-                <div className={`flex items-center gap-1.5 mb-1.5 ${(candidate.criminal_cases || 0) > 0 ? "text-[#dc2626]" : "text-[#16a34a]"} opacity-80`}><AlertTriangle className="h-3 w-3" /><span className="font-mono text-[9px] font-bold tracking-wider">CRIMINAL CASES</span></div>
-                <div className={`font-mono text-lg font-medium ${(candidate.criminal_cases || 0) > 0 ? "text-[#dc2626]" : "text-[#16a34a]"}`}>{(candidate.criminal_cases || 0) > 0 ? `${candidate.criminal_cases} ACTIVE CASES` : "NONE FILED"}</div>
+
+              <div className="rounded-lg border border-[#e4e4e7] bg-[#fafafa] p-3 font-mono text-[9px] text-[#52525b]">
+                <p className="mb-1 font-bold uppercase tracking-wider text-[#71717a]">Record IDs</p>
+                <p className="break-all">
+                  <span className="text-[#a1a1aa]">Candidate:</span> {candidate.id}
+                </p>
+                {candidate.myneta_candidate_id && (
+                  <p className="break-all">
+                    <span className="text-[#a1a1aa]">MyNeta ID:</span> {candidate.myneta_candidate_id}
+                  </p>
+                )}
+                {candidate.constituency_id && (
+                  <p className="break-all">
+                    <span className="text-[#a1a1aa]">Seat ID:</span> {candidate.constituency_id}
+                  </p>
+                )}
               </div>
             </div>
 
-            <div className="mt-6 flex flex-col gap-4 border-t border-[#e4e4e7] pt-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-[#f4f4f5] border border-[#e4e4e7] rounded p-3">
-                  <h3 className="font-mono text-[10px] font-bold text-[#52525b] mb-2 tracking-wider flex items-center gap-1.5"><MapPin className="h-3 w-3" /> CONTESTING CONSTITUENCY</h3>
-                  <div className="text-xs text-[#27272a] space-y-1">
-                    <p><span className="text-[#71717a]">ID:</span> {(candidate.constituency_id || "").toUpperCase()}</p>
-                    <p><span className="text-[#71717a]">Status:</span> {candidate.removed ? "REMOVED / WITHDRAWN" : "ECI Verified & Accepted"}</p>
-                  </div>
+            {/* Main facts */}
+            <div className="min-w-0 flex-1 space-y-4">
+              <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-3">
+                <StatCard
+                  icon={<User className="h-3.5 w-3.5" />}
+                  label="Age / Gender"
+                  value={
+                    [candidate.age != null ? `${candidate.age} yrs` : null, candidate.gender].filter(Boolean).join(" · ") ||
+                    "—"
+                  }
+                  tone="neutral"
+                />
+                <StatCard
+                  icon={<GraduationCap className="h-3.5 w-3.5" />}
+                  label="Education"
+                  value={normalizeEducation(candidate.education) || "—"}
+                  tone="neutral"
+                />
+                <StatCard
+                  icon={<IndianRupee className="h-3.5 w-3.5" />}
+                  label="Declared assets"
+                  value={formatIndianCurrency(candidate.assets_value || 0)}
+                  tone="wealth"
+                />
+                <StatCard
+                  icon={<Scale className="h-3.5 w-3.5" />}
+                  label="Liabilities"
+                  value={formatIndianCurrency(candidate.liabilities_value || 0)}
+                  tone="neutral"
+                />
+                <StatCard
+                  icon={<AlertTriangle className="h-3.5 w-3.5" />}
+                  label="Criminal cases"
+                  value={
+                    (candidate.criminal_cases || 0) > 0
+                      ? `${candidate.criminal_cases} case(s) declared`
+                      : "None declared"
+                  }
+                  tone={(candidate.criminal_cases || 0) > 0 ? "risk" : "ok"}
+                />
+                <StatCard
+                  icon={<Shield className="h-3.5 w-3.5" />}
+                  label="Nomination"
+                  value={candidate.nomination_status || "—"}
+                  tone="neutral"
+                />
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-[#e4e4e7] bg-[#f8fafc] p-4">
+                  <h3 className="mb-2 flex items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-wider text-[#52525b]">
+                    <Building2 className="h-3.5 w-3.5 text-[#0284c7]" />
+                    Constituency
+                  </h3>
+                  <ul className="space-y-1.5 font-mono text-[11px] text-[#27272a]">
+                    <li>
+                      <span className="text-[#71717a]">Name:</span> {seat?.name || "—"}
+                    </li>
+                    <li>
+                      <span className="text-[#71717a]">State:</span> {seat?.state || "—"}
+                    </li>
+                    <li>
+                      <span className="text-[#71717a]">District:</span> {seat?.district || "—"}
+                    </li>
+                    <li>
+                      <span className="text-[#71717a]">Reservation:</span> {seat?.reservation || "GEN"}
+                    </li>
+                    {seat?.electorate != null && (
+                      <li>
+                        <span className="text-[#71717a]">Electorate (baseline):</span>{" "}
+                        {Number(seat.electorate).toLocaleString("en-IN")}
+                      </li>
+                    )}
+                  </ul>
                 </div>
 
-                <div className="bg-[#f4f4f5] border border-[#e4e4e7] rounded p-3">
-                  <h3 className="font-mono text-[10px] font-bold text-[#52525b] mb-2 tracking-wider flex items-center gap-1.5"><User className="h-3 w-3" /> POLITICAL BACKGROUND</h3>
-                  <div className="text-xs text-[#71717a] space-y-1">
-                    {candidate.background ? <p className="text-[#27272a]">{candidate.background}</p> : <p>Awaiting background dossier extraction.</p>}
-                  </div>
+                <div className="rounded-xl border border-[#e4e4e7] bg-[#f8fafc] p-4">
+                  <h3 className="mb-2 flex items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-wider text-[#52525b]">
+                    <Calendar className="h-3.5 w-3.5 text-[#16a34a]" />
+                    Source sync
+                  </h3>
+                  <ul className="space-y-1.5 font-mono text-[10px] text-[#27272a]">
+                    <li className="flex items-start gap-2">
+                      <BadgeCheck className="mt-0.5 h-3 w-3 shrink-0 text-[#16a34a]" />
+                      <span>
+                        <span className="text-[#71717a]">ECI last sync:</span>{" "}
+                        {fmtIso(candidate.eci_last_synced_at) || "—"}
+                      </span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <BadgeCheck className="mt-0.5 h-3 w-3 shrink-0 text-[#0284c7]" />
+                      <span>
+                        <span className="text-[#71717a]">MyNeta last sync:</span>{" "}
+                        {fmtIso(candidate.myneta_last_synced_at) || "—"}
+                      </span>
+                    </li>
+                  </ul>
                 </div>
               </div>
 
-              {/* REAL Latest News mapped from DB */}
-              <div className="bg-[#f4f4f5] border border-[#e4e4e7] rounded p-3 mb-2">
-                <h3 className="font-mono text-[10px] font-bold text-[#52525b] mb-2 tracking-wider flex items-center gap-1.5"><Search className="h-3 w-3" /> REAL-TIME CONSTITUENCY INTELLIGENCE</h3>
-                <div className="text-xs text-[#27272a] space-y-2">
-                  {candidateSignals.length > 0 ? candidateSignals.map((sig: any) => (
-                    <div key={sig.id} className="flex gap-2">
-                      <span className={`${sig.severity >= 4 ? "text-[#dc2626]" : "text-[#16a34a]"} font-mono shrink-0`}><Activity className="w-3 h-3 inline mr-1" /></span>
-                      <p>{sig.title}</p>
-                    </div>
-                  )) : (
-                    <p className="text-[#71717a]">No recent intelligence reports filed for this constituency.</p>
-                  )}
+              {candidate.background ? (
+                <div className="rounded-xl border border-[#e4e4e7] bg-white p-4">
+                  <h3 className="mb-2 font-mono text-[10px] font-bold uppercase tracking-wider text-[#52525b]">
+                    Background
+                  </h3>
+                  <p className="text-sm leading-relaxed text-[#334155]">{candidate.background}</p>
                 </div>
+              ) : null}
+
+              <div className="rounded-xl border border-[#e4e4e7] bg-[#fffbeb] p-4">
+                <h3 className="mb-2 flex items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-wider text-[#92400e]">
+                  <Search className="h-3.5 w-3.5" />
+                  Constituency signals
+                </h3>
+                {candidateSignals.length > 0 ? (
+                  <ul className="space-y-2">
+                    {candidateSignals.map((sig: any) => (
+                      <li key={sig.id} className="flex gap-2 text-sm text-[#422006]">
+                        <Activity
+                          className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${(sig.severity || 0) >= 4 ? "text-[#dc2626]" : "text-[#16a34a]"}`}
+                        />
+                        <span>{sig.title}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-[#a16207]">No recent signals tied to this seat.</p>
+                )}
               </div>
             </div>
           </div>
@@ -165,4 +371,32 @@ export default function CandidateModal({ candidate, onClose }: { candidate: any;
 
   if (!mounted) return null;
   return createPortal(modalContent, document.body);
+}
+
+function StatCard({
+  icon,
+  label,
+  value,
+  tone,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  tone: "neutral" | "wealth" | "risk" | "ok";
+}) {
+  const styles = {
+    neutral: "border-[#e4e4e7] bg-[#fafafa] text-[#27272a]",
+    wealth: "border-[#ea580c]/25 bg-[#fff7ed] text-[#c2410c]",
+    risk: "border-[#dc2626]/25 bg-[#fef2f2] text-[#b91c1c]",
+    ok: "border-[#16a34a]/25 bg-[#f0fdf4] text-[#15803d]",
+  }[tone];
+  return (
+    <div className={`rounded-xl border p-3 ${styles}`}>
+      <div className="mb-1 flex items-center gap-1.5 font-mono text-[8px] font-bold uppercase tracking-wider opacity-80">
+        {icon}
+        {label}
+      </div>
+      <div className="break-words font-mono text-[11px] font-semibold leading-snug sm:text-xs">{value}</div>
+    </div>
+  );
 }
