@@ -87,20 +87,20 @@ export default function CandidateModal({
       aria-modal="true"
       aria-labelledby="dossier-title"
     >
-      <div className="flex max-h-[100dvh] sm:max-h-[95vh] w-full sm:max-w-5xl flex-col overflow-hidden rounded-t-2xl border border-[#e4e4e7] bg-white shadow-2xl sm:rounded-xl">
+      <div className="flex max-h-[100dvh] sm:max-h-[95vh] w-full sm:max-w-5xl flex-col overflow-hidden rounded-t-2xl border border-[color:var(--border)] bg-[var(--surface-1)] shadow-2xl sm:rounded-xl">
         {/* Header — mobile: taller tap target; desktop: compact strip */}
         <div
-          className="shrink-0 border-b border-[#e4e4e7] bg-gradient-to-r from-[#f8fafc] to-[#f1f5f9] px-4 py-3 sm:py-3.5"
+          className="shrink-0 border-b border-[color:var(--border)] bg-[var(--surface-2)] px-4 py-3 sm:py-3.5"
           style={{ borderLeftWidth: 4, borderLeftColor: partyColor }}
         >
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <p className="font-mono text-[9px] font-bold uppercase tracking-[0.2em] text-[#71717a] sm:text-[10px]">
+              <p className="font-mono text-[9px] font-bold uppercase tracking-[0.2em] text-[var(--text-muted)] sm:text-[10px]">
                 Dossier file
               </p>
               <h1
                 id="dossier-title"
-                className="mt-0.5 break-words font-mono text-lg font-bold leading-tight text-[#0f172a] sm:text-2xl"
+                className="mt-0.5 break-words font-mono text-lg font-bold leading-tight text-[var(--text-primary)] sm:text-2xl"
               >
                 {candidate.name}
               </h1>
@@ -114,7 +114,7 @@ export default function CandidateModal({
                     </span>
                   </span>
                   {seat.phase != null && (
-                    <span className="rounded bg-[#f4f4f5] px-2 py-0.5 font-mono text-[9px] text-[#52525b]">
+                    <span className="rounded bg-[var(--surface-3)] px-2 py-0.5 font-mono text-[9px] text-[var(--text-secondary)]">
                       Phase {seat.phase}
                     </span>
                   )}
@@ -136,7 +136,7 @@ export default function CandidateModal({
                   </span>
                 </span>
                 {candidate.is_independent && (
-                  <span className="rounded border border-[#e4e4e7] bg-[#fafafa] px-2 py-0.5 font-mono text-[9px] font-bold text-[#52525b]">
+                  <span className="rounded border border-[color:var(--border)] bg-[var(--surface-2)] px-2 py-0.5 font-mono text-[9px] font-bold text-[var(--text-secondary)]">
                     INDEPENDENT
                   </span>
                 )}
@@ -155,7 +155,7 @@ export default function CandidateModal({
             <button
               type="button"
               onClick={onClose}
-              className="shrink-0 rounded-lg p-2 text-[#71717a] transition-colors hover:bg-[#e4e4e7] hover:text-[#18181b]"
+              className="shrink-0 rounded-lg p-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-3)] hover:text-[var(--text-primary)]"
               aria-label="Close dossier"
             >
               <X className="h-5 w-5" />
@@ -168,7 +168,7 @@ export default function CandidateModal({
           <div className="flex flex-col gap-4 p-4 lg:flex-row lg:gap-6 lg:p-6">
             {/* Photo + sources */}
             <div className="flex w-full flex-col gap-3 lg:w-[220px] lg:shrink-0 xl:w-[240px]">
-              <div className="mx-auto aspect-[3/4] w-full max-w-[200px] overflow-hidden rounded-xl border border-[#e4e4e7] bg-[#f4f4f5] shadow-inner lg:mx-0 lg:max-w-none">
+              <div className="mx-auto aspect-[3/4] w-full max-w-[200px] overflow-hidden rounded-xl border border-[color:var(--border)] bg-[var(--surface-2)] shadow-inner lg:mx-0 lg:max-w-none">
                 {candidate.photo_url && !imgError ? (
                   <img
                     src={candidate.photo_url}
@@ -178,7 +178,7 @@ export default function CandidateModal({
                   />
                 ) : (
                   <div className="flex h-full items-center justify-center">
-                    <User className="h-16 w-16 text-[#d4d4d8]" />
+                    <User className="h-16 w-16 text-[var(--text-muted)] opacity-60" />
                   </div>
                 )}
               </div>
@@ -191,7 +191,7 @@ export default function CandidateModal({
                   className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 font-mono text-[10px] font-bold transition-colors sm:py-2 ${
                     eciUrl
                       ? "border-[#16a34a]/35 bg-[#16a34a]/10 text-[#15803d] hover:bg-[#16a34a] hover:text-white"
-                      : "pointer-events-none border-[#e4e4e7] bg-[#f4f4f5] text-[#a1a1aa]"
+                      : "pointer-events-none border-[color:var(--border)] bg-[var(--surface-2)] text-[var(--text-muted)]"
                   }`}
                 >
                   <ExternalLink className="h-3.5 w-3.5 shrink-0" />
@@ -208,26 +208,26 @@ export default function CandidateModal({
                     ADR MYNETA PROFILE
                   </a>
                 ) : (
-                  <div className="rounded-lg border border-dashed border-[#e4e4e7] bg-[#fafafa] px-3 py-2.5 text-center font-mono text-[9px] leading-snug text-[#71717a]">
-                    <Link2 className="mx-auto mb-1 h-3.5 w-3.5 text-[#a1a1aa]" />
+                  <div className="rounded-lg border border-dashed border-[color:var(--border)] bg-[var(--surface-2)] px-3 py-2.5 text-center font-mono text-[9px] leading-snug text-[var(--text-muted)]">
+                    <Link2 className="mx-auto mb-1 h-3.5 w-3.5 text-[var(--text-muted)] opacity-70" />
                     MyNeta link not linked yet. Re-run dossier ingest after a match is found.
                   </div>
                 )}
               </div>
 
-              <div className="rounded-lg border border-[#e4e4e7] bg-[#fafafa] p-3 font-mono text-[9px] text-[#52525b]">
-                <p className="mb-1 font-bold uppercase tracking-wider text-[#71717a]">Record IDs</p>
+              <div className="rounded-lg border border-[color:var(--border)] bg-[var(--surface-2)] p-3 font-mono text-[9px] text-[var(--text-secondary)]">
+                <p className="mb-1 font-bold uppercase tracking-wider text-[var(--text-muted)]">Record IDs</p>
                 <p className="break-all">
-                  <span className="text-[#a1a1aa]">Candidate:</span> {candidate.id}
+                  <span className="text-[var(--text-muted)]">Candidate:</span> {candidate.id}
                 </p>
                 {candidate.myneta_candidate_id && (
                   <p className="break-all">
-                    <span className="text-[#a1a1aa]">MyNeta ID:</span> {candidate.myneta_candidate_id}
+                    <span className="text-[var(--text-muted)]">MyNeta ID:</span> {candidate.myneta_candidate_id}
                   </p>
                 )}
                 {candidate.constituency_id && (
                   <p className="break-all">
-                    <span className="text-[#a1a1aa]">Seat ID:</span> {candidate.constituency_id}
+                    <span className="text-[var(--text-muted)]">Seat ID:</span> {candidate.constituency_id}
                   </p>
                 )}
               </div>
@@ -282,50 +282,50 @@ export default function CandidateModal({
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-xl border border-[#e4e4e7] bg-[#f8fafc] p-4">
-                  <h3 className="mb-2 flex items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-wider text-[#52525b]">
+                <div className="rounded-xl border border-[color:var(--border)] bg-[var(--surface-2)] p-4">
+                  <h3 className="mb-2 flex items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-wider text-[var(--text-secondary)]">
                     <Building2 className="h-3.5 w-3.5 text-[#0284c7]" />
                     Constituency
                   </h3>
-                  <ul className="space-y-1.5 font-mono text-[11px] text-[#27272a]">
+                  <ul className="space-y-1.5 font-mono text-[11px] text-[var(--text-primary)]">
                     <li>
-                      <span className="text-[#71717a]">Name:</span> {seat?.name || "—"}
+                      <span className="text-[var(--text-muted)]">Name:</span> {seat?.name || "—"}
                     </li>
                     <li>
-                      <span className="text-[#71717a]">State:</span> {seat?.state || "—"}
+                      <span className="text-[var(--text-muted)]">State:</span> {seat?.state || "—"}
                     </li>
                     <li>
-                      <span className="text-[#71717a]">District:</span> {seat?.district || "—"}
+                      <span className="text-[var(--text-muted)]">District:</span> {seat?.district || "—"}
                     </li>
                     <li>
-                      <span className="text-[#71717a]">Reservation:</span> {seat?.reservation || "GEN"}
+                      <span className="text-[var(--text-muted)]">Reservation:</span> {seat?.reservation || "GEN"}
                     </li>
                     {seat?.electorate != null && (
                       <li>
-                        <span className="text-[#71717a]">Electorate (baseline):</span>{" "}
+                        <span className="text-[var(--text-muted)]">Electorate (baseline):</span>{" "}
                         {Number(seat.electorate).toLocaleString("en-IN")}
                       </li>
                     )}
                   </ul>
                 </div>
 
-                <div className="rounded-xl border border-[#e4e4e7] bg-[#f8fafc] p-4">
-                  <h3 className="mb-2 flex items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-wider text-[#52525b]">
+                <div className="rounded-xl border border-[color:var(--border)] bg-[var(--surface-2)] p-4">
+                  <h3 className="mb-2 flex items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-wider text-[var(--text-secondary)]">
                     <Calendar className="h-3.5 w-3.5 text-[#16a34a]" />
                     Source sync
                   </h3>
-                  <ul className="space-y-1.5 font-mono text-[10px] text-[#27272a]">
+                  <ul className="space-y-1.5 font-mono text-[10px] text-[var(--text-primary)]">
                     <li className="flex items-start gap-2">
                       <BadgeCheck className="mt-0.5 h-3 w-3 shrink-0 text-[#16a34a]" />
                       <span>
-                        <span className="text-[#71717a]">ECI last sync:</span>{" "}
+                        <span className="text-[var(--text-muted)]">ECI last sync:</span>{" "}
                         {fmtIso(candidate.eci_last_synced_at) || "—"}
                       </span>
                     </li>
                     <li className="flex items-start gap-2">
                       <BadgeCheck className="mt-0.5 h-3 w-3 shrink-0 text-[#0284c7]" />
                       <span>
-                        <span className="text-[#71717a]">MyNeta last sync:</span>{" "}
+                        <span className="text-[var(--text-muted)]">MyNeta last sync:</span>{" "}
                         {fmtIso(candidate.myneta_last_synced_at) || "—"}
                       </span>
                     </li>
@@ -334,23 +334,23 @@ export default function CandidateModal({
               </div>
 
               {candidate.background ? (
-                <div className="rounded-xl border border-[#e4e4e7] bg-white p-4">
-                  <h3 className="mb-2 font-mono text-[10px] font-bold uppercase tracking-wider text-[#52525b]">
+                <div className="rounded-xl border border-[color:var(--border)] bg-[var(--surface-1)] p-4">
+                  <h3 className="mb-2 font-mono text-[10px] font-bold uppercase tracking-wider text-[var(--text-secondary)]">
                     Background
                   </h3>
-                  <p className="text-sm leading-relaxed text-[#334155]">{candidate.background}</p>
+                  <p className="text-sm leading-relaxed text-[var(--text-secondary)]">{candidate.background}</p>
                 </div>
               ) : null}
 
-              <div className="rounded-xl border border-[#e4e4e7] bg-[#fffbeb] p-4">
-                <h3 className="mb-2 flex items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-wider text-[#92400e]">
+              <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 p-4">
+                <h3 className="mb-2 flex items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-wider text-amber-200">
                   <Search className="h-3.5 w-3.5" />
                   Constituency signals
                 </h3>
                 {candidateSignals.length > 0 ? (
                   <ul className="space-y-2">
                     {candidateSignals.map((sig: any) => (
-                      <li key={sig.id} className="flex gap-2 text-sm text-[#422006]">
+                      <li key={sig.id} className="flex gap-2 text-sm text-amber-100">
                         <Activity
                           className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${(sig.severity || 0) >= 4 ? "text-[#dc2626]" : "text-[#16a34a]"}`}
                         />
@@ -359,7 +359,7 @@ export default function CandidateModal({
                     ))}
                   </ul>
                 ) : (
-                  <p className="text-sm text-[#a16207]">No recent signals tied to this seat.</p>
+                  <p className="text-sm text-amber-200/80">No recent signals tied to this seat.</p>
                 )}
               </div>
             </div>
@@ -385,7 +385,7 @@ function StatCard({
   tone: "neutral" | "wealth" | "risk" | "ok";
 }) {
   const styles = {
-    neutral: "border-[#e4e4e7] bg-[#fafafa] text-[#27272a]",
+    neutral: "border-[color:var(--border)] bg-[var(--surface-2)] text-[var(--text-primary)]",
     wealth: "border-[#ea580c]/25 bg-[#fff7ed] text-[#c2410c]",
     risk: "border-[#dc2626]/25 bg-[#fef2f2] text-[#b91c1c]",
     ok: "border-[#16a34a]/25 bg-[#f0fdf4] text-[#15803d]",

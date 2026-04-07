@@ -28,24 +28,24 @@ export default function StateOverview({ state }: StateOverviewProps) {
   if (seats === 0) return null;
 
   return (
-    <div className="grid grid-cols-4 gap-0 border-b border-[#e4e4e7] shrink-0 bg-white">
-      <div className="px-2 py-1.5 border-r border-[#e4e4e7] text-center">
+    <div className="grid grid-cols-4 gap-0 border-b border-[color:var(--border)] shrink-0 bg-[var(--surface-1)]">
+      <div className="px-2 py-1.5 border-r border-[color:var(--border)] text-center">
         <div className="font-mono text-[10px] text-[#16a34a] font-bold">{seats}</div>
-        <div className="font-mono text-[7px] text-[#71717a]">{state === "ALL" ? "NAT. SEATS" : "SEATS"}</div>
+        <div className="font-mono text-[7px] text-[var(--text-muted)]">{state === "ALL" ? "NAT. SEATS" : "SEATS"}</div>
       </div>
-      <div className="px-2 py-1.5 border-r border-[#e4e4e7] text-center">
+      <div className="px-2 py-1.5 border-r border-[color:var(--border)] text-center">
         <div className="font-mono text-[10px] text-[#0284c7] font-bold">{stateCandidates.length}</div>
-        <div className="font-mono text-[7px] text-[#71717a]">CANDS</div>
+        <div className="font-mono text-[7px] text-[var(--text-muted)]">CANDS</div>
       </div>
-      <div className="px-2 py-1.5 border-r border-[#e4e4e7] text-center">
+      <div className="px-2 py-1.5 border-r border-[color:var(--border)] text-center">
         <div className="font-mono text-[10px] text-[#dc2626] font-bold">{criminalCount}</div>
-        <div className="font-mono text-[7px] text-[#71717a]">CRIM</div>
+        <div className="font-mono text-[7px] text-[var(--text-muted)]">CRIM</div>
       </div>
       <div className="px-2 py-1.5 text-center">
         <div className="font-mono text-[10px] text-[#ea580c] font-bold">
           {avgVolatility.toFixed(0)}%
         </div>
-        <div className="font-mono text-[7px] text-[#71717a]">VOL</div>
+        <div className="font-mono text-[7px] text-[var(--text-muted)]">VOL</div>
       </div>
     </div>
   );

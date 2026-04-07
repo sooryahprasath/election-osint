@@ -92,6 +92,32 @@ CREATE TABLE signals (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
 );
 
+-- 3B. Social Signals (separate from intelligence signals)
+-- Raw social posts + normalized/event summaries for the Social pane.
+CREATE TABLE social_signals (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    platform TEXT,
+    handle TEXT,
+    post_url TEXT,
+    title TEXT,
+    body TEXT,
+    english_title TEXT,
+    english_summary TEXT,
+    language TEXT,
+    kind TEXT, -- tier_a_official | tier_a_media | tier_b_public etc.
+    tier TEXT, -- A | B
+    verified BOOLEAN,
+    score REAL,
+    tags JSONB,
+    evidence JSONB,
+    image_url TEXT,
+    video_url TEXT,
+    content_hash TEXT,
+    simhash64 BIGINT,
+    published_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
+);
+
 -- 4. AI Briefings
 CREATE TABLE briefings (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -145,6 +171,7 @@ CREATE TABLE live_results (
 alter publication supabase_realtime add table constituencies;
 alter publication supabase_realtime add table candidates;
 alter publication supabase_realtime add table signals;
+alter publication supabase_realtime add table social_signals;
 alter publication supabase_realtime add table briefings;
 alter publication supabase_realtime add table voter_turnout;
 alter publication supabase_realtime add table exit_polls;
@@ -165,6 +192,7 @@ create index if not exists idx_candidates_myneta_candidate_id on public.candidat
 alter table public.constituencies enable row level security;
 alter table public.candidates enable row level security;
 alter table public.signals enable row level security;
+alter table public.social_signals enable row level security;
 alter table public.briefings enable row level security;
 alter table public.voter_turnout enable row level security;
 alter table public.exit_polls enable row level security;
@@ -173,6 +201,7 @@ alter table public.live_results enable row level security;
 revoke all on table public.constituencies from anon, authenticated;
 revoke all on table public.candidates from anon, authenticated;
 revoke all on table public.signals from anon, authenticated;
+revoke all on table public.social_signals from anon, authenticated;
 revoke all on table public.briefings from anon, authenticated;
 revoke all on table public.voter_turnout from anon, authenticated;
 revoke all on table public.exit_polls from anon, authenticated;
@@ -181,6 +210,7 @@ revoke all on table public.live_results from anon, authenticated;
 grant select on table public.constituencies to anon, authenticated;
 grant select on table public.candidates to anon, authenticated;
 grant select on table public.signals to anon, authenticated;
+grant select on table public.social_signals to anon, authenticated;
 grant select on table public.briefings to anon, authenticated;
 grant select on table public.voter_turnout to anon, authenticated;
 grant select on table public.exit_polls to anon, authenticated;
@@ -189,6 +219,7 @@ grant select on table public.live_results to anon, authenticated;
 drop policy if exists "public_read_constituencies" on public.constituencies;
 drop policy if exists "public_read_candidates" on public.candidates;
 drop policy if exists "public_read_signals" on public.signals;
+drop policy if exists "public_read_social_signals" on public.social_signals;
 drop policy if exists "public_read_briefings" on public.briefings;
 drop policy if exists "public_read_voter_turnout" on public.voter_turnout;
 drop policy if exists "public_read_exit_polls" on public.exit_polls;
@@ -197,6 +228,7 @@ drop policy if exists "public_read_live_results" on public.live_results;
 create policy "public_read_constituencies" on public.constituencies for select using (true);
 create policy "public_read_candidates" on public.candidates for select using (true);
 create policy "public_read_signals" on public.signals for select using (true);
+create policy "public_read_social_signals" on public.social_signals for select using (true);
 create policy "public_read_briefings" on public.briefings for select using (true);
 create policy "public_read_voter_turnout" on public.voter_turnout for select using (true);
 create policy "public_read_exit_polls" on public.exit_polls for select using (true);

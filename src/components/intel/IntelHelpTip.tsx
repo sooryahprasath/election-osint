@@ -44,7 +44,7 @@ export default function IntelHelpTip({ label, children }: { label: string; child
           e.stopPropagation();
           setOpen((o) => !o);
         }}
-        className="rounded p-0.5 text-[#a1a1aa] transition-colors hover:bg-[#f4f4f5] hover:text-[#52525b]"
+        className="rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)]"
       >
         <HelpCircle className="h-2.5 w-2.5" />
       </button>
@@ -62,7 +62,7 @@ export default function IntelHelpTip({ label, children }: { label: string; child
             <div
               role="dialog"
               aria-modal="true"
-              className="fixed z-[210] overflow-y-auto overscroll-contain rounded-lg border border-zinc-600 bg-zinc-900 p-3 text-[10px] font-normal leading-relaxed text-zinc-100 shadow-2xl normal-case tracking-normal"
+              className="fixed z-[210] overflow-y-auto overscroll-contain rounded-lg border border-[color:var(--border)] bg-[var(--surface-3)] p-3 text-[10px] font-normal leading-relaxed text-[var(--text-primary)] shadow-2xl normal-case tracking-normal"
               style={{
                 top: box.top,
                 left: box.left,

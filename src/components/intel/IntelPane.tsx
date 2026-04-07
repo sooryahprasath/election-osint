@@ -1,20 +1,26 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Search, Filter, ChevronRight, AlertTriangle, Activity } from "lucide-react";
+import { Search, Filter, ChevronRight, AlertTriangle, Activity, X } from "lucide-react";
 import { useLiveData } from "@/lib/context/LiveDataContext";
 import ConstituencyCard from "./ConstituencyCard";
 import StateOverview from "./StateOverview";
-import PhaseTimeline from "../signals/PhaseTimeline";
 import IntelHelpTip from "./IntelHelpTip";
 import { STATE_META } from "@/lib/utils/states";
 
 type SortMode = "VOLATILITY" | "NAME" | "PHASE";
 
-export default function IntelPane({ globalStateFilter, setGlobalStateFilter, globalConstituencyId, setGlobalConstituencyId }: any) {
+export default function IntelPane({
+  globalStateFilter,
+  setGlobalStateFilter,
+  globalConstituencyId,
+  setGlobalConstituencyId,
+  onBackToMap,
+}: any) {
   const [searchQuery, setSearchQuery] = useState("");
   const [partyFilter, setPartyFilter] = useState("ALL");
   const [sortMode, setSortMode] = useState<SortMode>("VOLATILITY");
+  const [pendingCandidate, setPendingCandidate] = useState<any | null>(null);
   const { constituencies, candidates, signals } = useLiveData();
 
   const activeState = globalStateFilter;
@@ -89,6 +95,44 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
     return true;
   });
 
+  const search = searchQuery.trim().toLowerCase();
+  const candidateMatches = useMemo(() => {
+    if (!search || search.length < 2) return [];
+    const allowedConstIds = new Set(stateConstituencies.map((c: any) => String(c.id)));
+    const constById = new Map<string, any>();
+    for (const c of constituencies) constById.set(String(c.id), c);
+
+    const out: any[] = [];
+    for (const cand of candidates as any[]) {
+      const cid = String(cand.constituency_id || "");
+      if (!cid || !allowedConstIds.has(cid)) continue;
+      const name = String(cand.name || "").toLowerCase();
+      if (!name.includes(search)) continue;
+      const seat = constById.get(cid);
+      out.push({
+        id: String(cand.id || `${cid}:${cand.name}`),
+        raw: cand,
+        name: cand.name,
+        party: cand.party || (cand.is_independent ? "IND" : ""),
+        constituency_id: cid,
+        constituency: seat?.name || cid,
+        state: seat?.state || activeState,
+        is_independent: !!cand.is_independent,
+      });
+      if (out.length >= 8) break;
+    }
+    return out;
+  }, [search, candidates, constituencies, stateConstituencies, activeState]);
+
+  const constituencyMatches = useMemo(() => {
+    if (!search || search.length < 2) return [];
+    const out = stateConstituencies
+      .filter((c: any) => String(c.name || "").toLowerCase().includes(search) || String(c.id || "").toLowerCase().includes(search))
+      .slice(0, 8)
+      .map((c: any) => ({ id: String(c.id), name: c.name, state: c.state }));
+    return out;
+  }, [search, stateConstituencies]);
+
   const sorted = [...filtered].sort((a, b) => {
     if (sortMode === "VOLATILITY") return (b.volatility_score || 0) - (a.volatility_score || 0);
     if (sortMode === "NAME") return a.name.localeCompare(b.name);
@@ -120,34 +164,49 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
 
   if (selectedConstituency) {
     return (
-      <aside className="flex min-h-0 flex-1 flex-col w-full overflow-hidden bg-[#ffffff] border-l border-[#e4e4e7]">
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-[#e4e4e7] shrink-0">
+      <aside className="flex min-h-0 flex-1 flex-col w-full overflow-hidden bg-[var(--surface-1)] border-l border-[color:var(--border)]">
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-[color:var(--border)] shrink-0">
           <button onClick={() => setGlobalConstituencyId(null)} className="font-mono text-[10px] text-[#16a34a] hover:text-[#16a34a]/80 transition-colors">← BACK</button>
-          <span className="font-mono text-[10px] text-[#71717a]">/</span>
-          <span className="font-mono text-[10px] text-[#52525b] truncate">{selectedConstituency.name.toUpperCase()}</span>
+          <span className="font-mono text-[10px] text-[var(--text-muted)]">/</span>
+          <span className="font-mono text-[10px] text-[var(--text-secondary)] truncate">{selectedConstituency.name.toUpperCase()}</span>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y pb-20 max-md:pb-28">
-          <ConstituencyCard constituency={selectedConstituency} />
+          <ConstituencyCard
+            constituency={selectedConstituency}
+            initialCandidate={pendingCandidate}
+            onConsumedInitialCandidate={() => setPendingCandidate(null)}
+          />
         </div>
       </aside>
     );
   }
 
   return (
-    <aside className="flex min-h-0 flex-1 flex-col w-full overflow-hidden bg-[#ffffff] border-l border-[#e4e4e7]">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-[#e4e4e7] shrink-0 bg-white">
+    <aside className="flex min-h-0 flex-1 flex-col w-full overflow-hidden bg-[var(--surface-1)] border-l border-[color:var(--border)]">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-[color:var(--border)] shrink-0 bg-[var(--surface-1)]">
         <div className="flex items-center gap-2">
           <Filter className="h-3.5 w-3.5 text-[#0284c7]" />
           <span className="font-mono text-xs font-bold text-[#0284c7] tracking-wider">INTEL PANE</span>
         </div>
-        <span className="font-mono text-[10px] text-[#71717a]">{sorted.length} seats</span>
+        <div className="flex items-center gap-2">
+          {typeof onBackToMap === "function" && activeState !== "ALL" ? (
+            <button
+              type="button"
+              onClick={onBackToMap}
+              className="rounded-md border border-[color:var(--border)] bg-[var(--surface-1)] px-2 py-1 font-mono text-[10px] font-bold text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+            >
+              ← MAP
+            </button>
+          ) : null}
+          <span className="font-mono text-[10px] text-[var(--text-muted)]">{sorted.length} seats</span>
+        </div>
       </div>
 
-      <div className="flex border-b border-[#e4e4e7] overflow-x-auto shrink-0 bg-[#f8fafc]">
+      <div className="flex border-b border-[color:var(--border)] overflow-x-auto shrink-0 bg-[var(--surface-2)]">
         <button
           onClick={() => { setGlobalStateFilter("ALL"); setSearchQuery(""); setGlobalConstituencyId(null); setPartyFilter("ALL"); }}
           style={{ color: activeState === "ALL" ? "#16a34a" : "#71717a", borderBottomColor: activeState === "ALL" ? "#16a34a" : "transparent", backgroundColor: activeState === "ALL" ? "#16a34a15" : "transparent" }}
-          className="flex-1 min-w-[50px] px-2 py-1.5 font-mono text-[10px] font-bold transition-colors border-b-2 hover:bg-[#f4f4f5]"
+          className="flex-1 min-w-[50px] px-2 py-1.5 font-mono text-[10px] font-bold transition-colors border-b-2 hover:bg-[var(--surface-1)]"
         >ALL</button>
 
         {Array.from(new Set(constituencies.map((c: any) => c.state))).filter(Boolean).map((state: any) => {
@@ -158,7 +217,7 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
               key={state}
               onClick={() => { setGlobalStateFilter(state); setSearchQuery(""); setGlobalConstituencyId(null); setPartyFilter("ALL"); }}
               style={{ color: isActive ? meta?.color : "#71717a", borderBottomColor: isActive ? meta?.color : "transparent", backgroundColor: isActive ? `${meta?.color}10` : "transparent" }}
-              className="flex-1 min-w-[40px] px-2 py-1.5 font-mono text-[10px] font-bold transition-colors border-b-2 hover:bg-[#f4f4f5]"
+              className="flex-1 min-w-[40px] px-2 py-1.5 font-mono text-[10px] font-bold transition-colors border-b-2 hover:bg-[var(--surface-1)]"
             >
               <div className="truncate">{meta?.abbr || state}</div>
             </button>
@@ -168,9 +227,9 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
 
       <StateOverview state={activeState} />
 
-      <div className="border-b border-[#e4e4e7] shrink-0">
-        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 bg-[#f8fafc] px-3 py-2">
-          <span className="flex min-w-0 flex-1 items-center gap-1.5 font-mono text-[10px] font-bold tracking-wider text-[#52525b]">
+      <div className="border-b border-[color:var(--border)] shrink-0">
+        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 bg-[var(--surface-2)] px-3 py-2">
+          <span className="flex min-w-0 flex-1 items-center gap-1.5 font-mono text-[10px] font-bold tracking-wider text-[var(--text-secondary)]">
             <Activity className="h-3 w-3 shrink-0 text-[#dc2626]" />
             <span className="flex min-w-0 flex-wrap items-center gap-1">
               <span className="whitespace-nowrap">HOTSPOTS (LAST 6H)</span>
@@ -188,7 +247,7 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
               </IntelHelpTip>
             </span>
           </span>
-          <span className="shrink-0 font-mono text-[9px] text-[#a1a1aa]">TAP TO FOCUS</span>
+          <span className="shrink-0 font-mono text-[9px] text-[var(--text-muted)]">TAP TO FOCUS</span>
         </div>
         {hotspots.length > 0 ? (
           <div className="px-2 pb-2">
@@ -204,21 +263,21 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
                     setGlobalConstituencyId(h.id);
                   }
                 }}
-                className="w-full flex items-center gap-2 px-2 py-2 rounded hover:bg-[#f4f4f5] transition-colors text-left"
+                className="w-full flex items-center gap-2 px-2 py-2 rounded hover:bg-[var(--surface-2)] transition-colors text-left"
               >
                 <div className={`h-2 w-2 rounded-full shrink-0 ${h.delta >= 3 ? "bg-[#dc2626]" : h.delta >= 1 ? "bg-[#ea580c]" : "bg-[#16a34a]"}`} />
                 <div className="flex-1 min-w-0">
-                  <div className="font-mono text-[10px] text-[#27272a] truncate">{h.name}</div>
-                  <div className="font-mono text-[8px] text-[#71717a]">
+                  <div className="font-mono text-[10px] text-[var(--text-primary)] truncate">{h.name}</div>
+                  <div className="font-mono text-[8px] text-[var(--text-muted)]">
                     vs prior 6h: {h.delta >= 0 ? `+${h.delta}` : h.delta} · this 6h strength: {h.recent}
                   </div>
                 </div>
-                <ChevronRight className="h-3 w-3 text-[#71717a] shrink-0" />
+                <ChevronRight className="h-3 w-3 text-[var(--text-muted)] shrink-0" />
               </button>
             ))}
           </div>
         ) : (
-          <div className="px-3 py-2 text-[10px] text-[#a1a1aa] leading-snug">
+          <div className="px-3 py-2 text-[10px] text-[var(--text-muted)] leading-snug">
             No hotspots right now—news may be quiet, or alerts are not yet linked to a seat on the map.
           </div>
         )}
@@ -233,18 +292,96 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
         </div>
       )}
 
-      <div className="border-b border-[#e4e4e7] shrink-0">
-        <PhaseTimeline />
-      </div>
-
-      <div className="px-2 py-2 border-b border-[#e4e4e7] shrink-0 flex flex-col gap-2 bg-[#f8fafc]">
-        <div className="flex items-center gap-1.5 px-2 py-1 bg-white border border-[#e4e4e7] rounded text-[10px]">
-          <Search className="h-3 w-3 text-[#71717a] shrink-0" />
-          <input type="text" placeholder="Search candidate or constituency..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="flex-1 bg-transparent text-[#27272a] placeholder-[#a1a1aa] outline-none font-mono text-[10px]" />
+      <div className="px-2 py-2 border-b border-[color:var(--border)] shrink-0 flex flex-col gap-2 bg-[var(--surface-2)]">
+        <div className="flex items-center gap-1.5 px-2 py-1 bg-[var(--surface-1)] border border-[color:var(--border)] rounded-md text-[10px]">
+          <Search className="h-3 w-3 text-[var(--text-muted)] shrink-0" />
+          <input
+            type="text"
+            placeholder="Search candidate or constituency..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="flex-1 bg-transparent text-[var(--text-primary)] placeholder-[color:var(--text-muted)] outline-none font-mono text-[10px]"
+          />
+          {searchQuery ? (
+            <button
+              type="button"
+              onClick={() => setSearchQuery("")}
+              className="rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
+              aria-label="Clear search"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          ) : null}
         </div>
+
+        {(candidateMatches.length > 0 || constituencyMatches.length > 0) && (
+          <div className="rounded-md border border-[color:var(--border)] bg-[var(--surface-1)] overflow-hidden">
+            <div className="px-2 py-1 border-b border-[color:var(--border)] flex items-center justify-between">
+              <span className="font-mono text-[9px] font-bold text-[var(--text-secondary)] tracking-wider">SEARCH RESULTS</span>
+              <span className="font-mono text-[8px] text-[var(--text-muted)]">tap to open</span>
+            </div>
+            <div className="max-h-[220px] overflow-y-auto pretty-scroll">
+              {candidateMatches.length > 0 ? (
+                <div className="px-2 py-1">
+                  <div className="font-mono text-[8px] text-[var(--text-muted)] tracking-wider mb-1">CANDIDATES</div>
+                  {candidateMatches.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => {
+                        setPendingCandidate(c.raw || null);
+                        if (c.state && c.state !== activeState) setGlobalStateFilter(c.state);
+                        setTimeout(() => setGlobalConstituencyId(c.constituency_id), 50);
+                      }}
+                      className="w-full rounded-md px-2 py-1.5 text-left hover:bg-[var(--surface-2)]"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-mono text-[10px] font-bold text-[var(--text-primary)] truncate">{c.name}</div>
+                          <div className="font-mono text-[8px] text-[var(--text-muted)] truncate">
+                            {String(c.constituency).toUpperCase()} · {String(c.state).toUpperCase()}
+                          </div>
+                          <div className="mt-0.5 font-mono text-[8px] font-bold text-[var(--text-secondary)] truncate">
+                            {c.is_independent ? "INDEPENDENT" : String(c.party || "").toUpperCase()}
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
+              {constituencyMatches.length > 0 ? (
+                <div className="px-2 py-1 border-t border-[color:var(--border)]">
+                  <div className="font-mono text-[8px] text-[var(--text-muted)] tracking-wider mb-1">CONSTITUENCIES</div>
+                  {constituencyMatches.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => {
+                        if (c.state && c.state !== activeState) setGlobalStateFilter(c.state);
+                        setTimeout(() => setGlobalConstituencyId(c.id), 50);
+                      }}
+                      className="w-full rounded-md px-2 py-1.5 text-left hover:bg-[var(--surface-2)]"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-mono text-[10px] font-bold text-[var(--text-primary)] truncate">{c.name}</div>
+                          <div className="font-mono text-[8px] text-[var(--text-muted)] truncate">{String(c.state).toUpperCase()}</div>
+                        </div>
+                        <ChevronRight className="h-3 w-3 text-[var(--text-muted)] shrink-0" />
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        )}
+
         <div className="flex items-center gap-1.5">
-          <Filter className="h-2.5 w-2.5 text-[#71717a] shrink-0 ml-1" />
-          <select value={partyFilter} onChange={(e) => setPartyFilter(e.target.value)} className="flex-1 bg-white border border-[#e4e4e7] rounded px-1 py-1 font-mono text-[9px] font-bold text-[#52525b] outline-none">
+          <Filter className="h-2.5 w-2.5 text-[var(--text-muted)] shrink-0 ml-1" />
+          <select value={partyFilter} onChange={(e) => setPartyFilter(e.target.value)} className="flex-1 bg-[var(--surface-1)] border border-[color:var(--border)] rounded-md px-1.5 py-1 font-mono text-[9px] font-bold text-[var(--text-secondary)] outline-none">
             <option value="ALL">ALL PARTIES</option>
             {uniqueParties.map(party => (
               <option key={party} value={party}>{party}</option>
@@ -255,8 +392,8 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y pb-20 max-md:pb-28">
-        <div className="sticky top-0 z-10 px-2 py-2 flex justify-between items-center bg-[#f4f4f5]/95 backdrop-blur border-b border-[#e4e4e7]">
-          <span className="font-mono text-[8px] text-[#71717a] tracking-wider flex items-center gap-1">
+        <div className="sticky top-0 z-10 px-2 py-2 flex justify-between items-center bg-[var(--surface-2)]/95 backdrop-blur border-b border-[color:var(--border)]">
+          <span className="font-mono text-[8px] text-[var(--text-muted)] tracking-wider flex items-center gap-1">
             SORT METRIC
             <IntelHelpTip label="What is volatility?">
               <span className="mb-2 block font-semibold text-white">Volatility index (0 to 100)</span>
@@ -271,7 +408,7 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
               </span>
             </IntelHelpTip>
           </span>
-          <select value={sortMode} onChange={(e) => setSortMode(e.target.value as SortMode)} className="bg-transparent font-mono text-[9px] font-bold text-[#52525b] outline-none cursor-pointer">
+          <select value={sortMode} onChange={(e) => setSortMode(e.target.value as SortMode)} className="bg-transparent font-mono text-[9px] font-bold text-[var(--text-secondary)] outline-none cursor-pointer">
             <option value="VOLATILITY">VOLATILITY (DESC)</option>
             <option value="NAME">CONSTITUENCY NAME (A-Z)</option>
             <option value="PHASE">ELECTION PHASE</option>
@@ -296,24 +433,24 @@ export default function IntelPane({ globalStateFilter, setGlobalStateFilter, glo
                 setGlobalConstituencyId(c.id);
               }
             }}
-            className="flex items-center w-full px-3 py-2.5 hover:bg-[#f4f4f5] transition-colors border-b border-[#f4f4f5] group text-left"
+            className="flex items-center w-full px-3 py-2 hover:bg-[var(--surface-2)] transition-colors border-b border-[color:var(--border)] group text-left"
           >
             <div className="h-6 w-1 rounded-full mr-2.5 shrink-0" style={{ backgroundColor: (c.volatility_score || 0) >= 70 ? "#dc2626" : (c.volatility_score || 0) >= 40 ? "#ea580c" : "#16a34a" }} />
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between gap-2">
-                <span className="font-mono text-[10px] text-[#27272a] truncate group-hover:text-[#16a34a] transition-colors">{c.name}</span>
-                <span className="font-mono text-[8px] text-[#71717a] shrink-0">#{c.id?.split('-')[1] || "0"}</span>
+                <span className="font-mono text-[10px] text-[var(--text-primary)] truncate group-hover:text-[#16a34a] transition-colors">{c.name}</span>
+                <span className="font-mono text-[8px] text-[var(--text-muted)] shrink-0">#{c.id?.split('-')[1] || "0"}</span>
               </div>
-              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-                <span className="font-mono text-[8px] text-[#71717a]">VOL {(c.volatility_score || 0).toFixed(0)}%</span>
-                <span className="font-mono text-[8px] text-[#71717a]">PH-{c.phase}</span>
-                <span className="font-mono text-[8px] text-[#71717a]">{candCountBySeat.get(String(c.id)) || 0} cands</span>
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="font-mono text-[8px] text-[var(--text-muted)]">VOL {(c.volatility_score || 0).toFixed(0)}%</span>
+                <span className="font-mono text-[8px] text-[var(--text-muted)]">PH-{c.phase}</span>
+                <span className="font-mono text-[8px] text-[var(--text-muted)]">{candCountBySeat.get(String(c.id)) || 0} cands</span>
                 <span className={`font-mono text-[8px] ${(crimCountBySeat.get(String(c.id)) || 0) > 0 ? "text-[#dc2626]" : "text-[#16a34a]"}`}>
                   {(crimCountBySeat.get(String(c.id)) || 0) > 0 ? `${crimCountBySeat.get(String(c.id))} crim` : "clean"}
                 </span>
               </div>
             </div>
-            <ChevronRight className="h-3 w-3 text-[#333] group-hover:text-[#71717a] shrink-0 transition-colors" />
+            <ChevronRight className="h-3 w-3 text-[var(--text-muted)] group-hover:text-[var(--text-muted)] shrink-0 transition-colors" />
           </button>
         )) : (
           <div className="p-6 text-center font-mono text-[10px] text-[#a1a1aa]">No matches found.</div>

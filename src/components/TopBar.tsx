@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { Radio, Shield, Activity, Clock, AlertTriangle, CheckCircle } from "lucide-react";
+import { Radio, Shield, Activity, Clock, AlertTriangle, CheckCircle, Sun, Moon } from "lucide-react";
 import { getNextElectionEvent, formatCountdown, formatTime } from "@/lib/utils/countdown";
 import { useLiveData } from "@/lib/context/LiveDataContext";
+import { excludeFromIntelligenceFeed } from "@/lib/utils/signalClassifier";
 
 /** Tiranga — compact for header (matches prior GitHub icon footprint). */
 const IndiaFlagIcon = ({ className }: { className?: string }) => (
@@ -25,6 +26,36 @@ export default function TopBar({ onSelectTickerSignal }: TopBarProps) {
   const [countdown, setCountdown] = useState(getNextElectionEvent());
   const [currentTime, setCurrentTime] = useState(new Date());
   const { signals } = useLiveData();
+  const [isDark, setIsDark] = useState(false);
+
+  useEffect(() => {
+    const stored = typeof window !== "undefined" ? window.localStorage.getItem("theme") : null;
+    const prefersDark =
+      typeof window !== "undefined" && window.matchMedia
+        ? window.matchMedia("(prefers-color-scheme: dark)").matches
+        : false;
+    const nextDark = stored ? stored === "dark" : prefersDark;
+    setIsDark(nextDark);
+    if (typeof document !== "undefined") {
+      document.documentElement.classList.toggle("dark", nextDark);
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    const next = !isDark;
+    setIsDark(next);
+    if (typeof document !== "undefined") {
+      // Smooth theme swap without “cascading” flashes.
+      document.documentElement.classList.add("theme-transition");
+      document.documentElement.classList.toggle("dark", next);
+      window.setTimeout(() => {
+        document.documentElement.classList.remove("theme-transition");
+      }, 220);
+    }
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("theme", next ? "dark" : "light");
+    }
+  };
 
   // ==========================================
   // ⚙️ Ticker State & Logic (Pause-and-Restart)
@@ -34,14 +65,16 @@ export default function TopBar({ onSelectTickerSignal }: TopBarProps) {
   const latestSignalsRef = useRef<any[]>([]);
 
   // 1. Filter the live data for SEV-4+ OR Official
-  const targetNews = signals.filter((s: any) => {
+  const intelSignals = signals.filter((s: any) => !excludeFromIntelligenceFeed(s));
+
+  const targetNews = intelSignals.filter((s: any) => {
     const isSevere = s.severity >= 4;
     const isOfficial = s.category?.toLowerCase() === "official";
     return isSevere || isOfficial;
   }).slice(0, 15);
 
   // Fallback to top 5 general news if there are no severe/official alerts
-  const freshSignals = targetNews.length > 0 ? targetNews : signals.slice(0, 5);
+  const freshSignals = targetNews.length > 0 ? targetNews : intelSignals.slice(0, 5);
 
   useEffect(() => {
     latestSignalsRef.current = freshSignals;
@@ -93,32 +126,30 @@ export default function TopBar({ onSelectTickerSignal }: TopBarProps) {
         }
       `}</style>
 
-      <header className="fixed top-0 left-0 right-0 z-50 flex h-9 items-center border-b border-[#e4e4e7] bg-[#ffffff] px-2 md:px-3 font-mono text-[10px] md:text-xs select-none">
-        <div className="flex items-center gap-2 mr-2 md:mr-4 shrink-0">
+      <header className="fixed top-0 left-0 right-0 z-50 flex h-9 items-center justify-between border-b border-[color:var(--border)] bg-[var(--surface-1)] px-2 md:px-3 font-mono text-[10px] md:text-xs select-none">
+        <div className="flex min-w-0 items-center gap-2 shrink-0">
           <Shield className="h-3.5 w-3.5 text-[#16a34a]" />
           <span className="font-bold text-[#16a34a] tracking-widest hidden md:inline">DHARMA-OSINT</span>
           <span className="font-bold text-[#16a34a] tracking-widest md:hidden">D-OSINT</span>
         </div>
 
-        <div className="h-4 w-px bg-[#e4e4e7] mr-2 md:mr-3 shrink-0" />
+        <div className="hidden md:block h-4 w-px bg-[color:var(--border)] mx-2 shrink-0" />
 
-        <div className="flex items-center gap-1.5 mr-2 md:mr-4 shrink-0">
+        <div className="hidden md:flex items-center gap-1.5 shrink-0">
           <div className="h-1.5 w-1.5 rounded-full bg-[#dc2626] animate-pulse shrink-0" />
           <span className="text-[#dc2626] font-semibold">LIVE</span>
         </div>
 
-        <div className="hidden md:flex items-center gap-1.5 mr-4 shrink-0">
+        <div className="hidden md:flex items-center gap-1.5 shrink-0 ml-3">
           <Radio className="h-3 w-3 text-[#16a34a] animate-pulse" />
-          <span className="text-[#52525b]">{countdown.label}:</span>
+          <span className="text-[var(--text-secondary)]">{countdown.label}:</span>
           <span className="text-[#16a34a] font-bold tabular-nums min-w-[120px]">
             {mounted ? `T-${formatCountdown(countdown)}` : "T-00d 00h 00m 00s"}
           </span>
         </div>
 
-        <div className="hidden md:block h-4 w-px bg-[#e4e4e7] mr-3 shrink-0" />
-
-        {/* The Scrolling Container */}
-        <div className="flex-1 overflow-hidden relative mx-2 h-full flex items-center">
+        {/* Desktop ticker only (mobile stays calm) */}
+        <div className="hidden md:flex flex-1 min-w-0 overflow-hidden relative mx-3 h-full items-center">
           {isScrolling && displayedSignals.length > 0 && (
             <div
               className="flex whitespace-nowrap absolute animate-sweep"
@@ -130,7 +161,7 @@ export default function TopBar({ onSelectTickerSignal }: TopBarProps) {
                   <button
                     key={`news-${h.id || i}`}
                     type="button"
-                    className="inline-flex items-center mr-8 cursor-pointer rounded-sm border-0 bg-transparent p-0 text-left font-mono hover:bg-zinc-100/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0284c7] focus-visible:ring-offset-1"
+                    className="inline-flex items-center mr-8 cursor-pointer rounded-sm border-0 bg-transparent p-0 text-left font-mono hover:bg-[var(--surface-2)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0284c7] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--surface-1)]"
                     onClick={() => onSelectTickerSignal?.(h)}
                   >
                     {h.severity >= 4 ? (
@@ -144,7 +175,7 @@ export default function TopBar({ onSelectTickerSignal }: TopBarProps) {
                     <span className={`mr-2 font-semibold ${h.severity >= 4 ? "text-[#dc2626]" : h.category?.toLowerCase() === 'official' ? "text-[#16a34a]" : "text-[#52525b]"}`}>
                       [{h.state ? h.state.toUpperCase() : "INDIA"}]
                     </span>
-                    <span className="text-[#27272a]">{h.title}</span>
+                    <span className="text-[var(--text-primary)]">{h.title}</span>
                   </button>
                 ))}
               </div>
@@ -152,19 +183,26 @@ export default function TopBar({ onSelectTickerSignal }: TopBarProps) {
           )}
         </div>
 
-        <div className="h-4 w-px bg-[#e4e4e7] ml-2 md:ml-3 mr-2 md:mr-3 shrink-0" />
+        <div className="flex shrink-0 items-center gap-2">
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Clock className="h-3 w-3 text-[var(--text-muted)]" />
+            <span className="text-[var(--text-secondary)] tabular-nums" suppressHydrationWarning>
+              {formatTime(currentTime)} IST
+            </span>
+          </div>
 
-        <div className="flex items-center gap-1.5 shrink-0">
-          <Clock className="h-3 w-3 text-[#71717a]" />
-          <span className="text-[#52525b] tabular-nums" suppressHydrationWarning>
-            {formatTime(currentTime)} IST
-          </span>
-        </div>
-
-        <div className="h-4 w-px bg-[#e4e4e7] ml-2 md:ml-3 mr-2 md:mr-3 shrink-0" />
-
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className="flex h-7 w-7 items-center justify-center rounded-md border border-[color:var(--border)] bg-[var(--surface-1)] text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+            aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+            title={isDark ? "Light mode" : "Dark mode"}
+          >
+            {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          </button>
 
           <IndiaFlagIcon className="h-3.5 w-[21px]" />
+        </div>
  
       </header>
     </>

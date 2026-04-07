@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 const SIGNALS_PAGE_SIZE = 500;
@@ -205,9 +205,32 @@ export const LiveDataProvider = ({ children }: { children: React.ReactNode }) =>
     };
   }, []);
 
-  return (
-    <LiveDataContext.Provider value={{ constituencies, candidates, signals, turnoutData, exitPolls, liveResults, isConnected, simulatedDate, setSimulatedDate, operationMode, setOperationMode }}>
-      {children}
-    </LiveDataContext.Provider>
+  const value = useMemo(
+    () => ({
+      constituencies,
+      candidates,
+      signals,
+      turnoutData,
+      exitPolls,
+      liveResults,
+      isConnected,
+      simulatedDate,
+      setSimulatedDate,
+      operationMode,
+      setOperationMode,
+    }),
+    [
+      constituencies,
+      candidates,
+      signals,
+      turnoutData,
+      exitPolls,
+      liveResults,
+      isConnected,
+      simulatedDate,
+      operationMode,
+    ]
   );
+
+  return <LiveDataContext.Provider value={value}>{children}</LiveDataContext.Provider>;
 };
