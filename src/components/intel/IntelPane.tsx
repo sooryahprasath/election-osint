@@ -193,7 +193,7 @@ export default function IntelPane({
             <button
               type="button"
               onClick={onBackToMap}
-              className="rounded-md border border-[color:var(--border)] bg-[var(--surface-1)] px-2 py-1 font-mono text-[10px] font-bold text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+              className="md:hidden rounded-md border border-[color:var(--border)] bg-[var(--surface-1)] px-2 py-1 font-mono text-[10px] font-bold text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
             >
               ← MAP
             </button>
