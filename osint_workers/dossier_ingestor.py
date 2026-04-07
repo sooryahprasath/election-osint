@@ -4,6 +4,7 @@ import re
 import time
 import json
 import difflib
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 
@@ -325,9 +326,31 @@ def clean_currency_to_int(s: str) -> int:
     s = s.strip()
     if s.lower() in ["nil", "none", "0", "rs 0 ~", "rs 0", "0 ~"]:
         return 0
-    # keep digits only (handles "Rs 3,14,54,433 ~3 Crore+")
-    digits = re.sub(r"[^\d]", "", s)
-    return int(digits) if digits else 0
+    # MyNeta strings are often like:
+    #   "Rs 35,16,05,765 ~35 Crore+"
+    # If we strip digits from the whole string we incorrectly append "35" to the rupee value,
+    # producing 35160576535 (→ 3516 Cr). Always take the value *before* "~" if present.
+    # Normalize common unicode tilde variants to "~" (Windows consoles can be cp1252).
+    s = s.replace("\u223c", "~").replace("\u221c", "~")
+    # Split on tilde-like separators (MyNeta sometimes uses unicode variants)
+    head = re.split(r"[~∼≈]", s, maxsplit=1)[0]
+    # If the separator is missing, still stop at the common unit suffixes to avoid digit bleed.
+    head = re.split(r"\b(crore|crores|lakh|lakhs|lacs)\b", head, maxsplit=1, flags=re.IGNORECASE)[0]
+    # MyNeta can include paise as decimals; ignore anything after the decimal point.
+    head = head.split(".", 1)[0]
+    # keep digits only
+    digits = re.sub(r"[^\d]", "", head)
+    if not digits:
+        return 0
+    try:
+        v = int(digits)
+    except Exception:
+        return 0
+    # Sanity guard: if something still looks absurdly large, prefer 0 over poisoning the DB/UI.
+    # (₹1e12 = 1,00,000 Cr)
+    if v > 1_000_000_000_000:
+        return 0
+    return v
 
 
 # ----------------------------
@@ -912,6 +935,139 @@ def enrich_candidates_from_myneta(*, headless: bool = True) -> None:
         browser.close()
 
 
+def _myneta_worker_run(cfg: dict, *, headless: bool) -> dict:
+    """
+    Run MyNeta enrichment for ONE state config in an isolated process.
+    This avoids Playwright thread-safety issues and speeds up total runtime.
+    """
+    # Recreate Supabase client in the child process.
+    url = os.getenv("NEXT_PUBLIC_SUPABASE_URL")
+    anon = os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+    sr = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    key = sr or anon
+    if not url or not key:
+        return {"state": cfg.get("name"), "merged": 0, "unresolved": 0, "error": "missing_supabase_env"}
+    try:
+        db: Client = create_client(url, key)
+    except Exception as e:
+        return {"state": cfg.get("name"), "merged": 0, "unresolved": 0, "error": f"supabase_init:{e}"}
+
+    prefix = cfg["prefix"]
+    base = cfg["base"]
+    pages = int(cfg["pages"])
+
+    # Load only the minimum we need for this state.
+    cands_res = db.table("candidates").select("id, name, constituency_id").eq("removed", False).like("constituency_id", f"{prefix}-%").execute()
+    db_candidates = cands_res.data or []
+    const_res = db.table("constituencies").select("id, name, state").like("id", f"{prefix}-%").execute()
+    db_constituencies = const_res.data or []
+
+    state_db_consts = {c["id"]: c["name"] for c in db_constituencies if (c.get("id") or "").startswith(prefix)}
+    state_db_cands = [c for c in db_candidates if (c.get("constituency_id") or "").startswith(prefix)]
+
+    merged = 0
+    unresolved = 0
+
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=headless)
+        ctx = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 900},
+        )
+        pw_page = ctx.new_page()
+
+        for page in range(1, pages + 1):
+            try:
+                rows = fetch_myneta_summary_rows(pw_page, base, page)
+            except Exception:
+                continue
+
+            for row in rows:
+                const_name_raw = row["constituency_name"]
+                cand_name_raw = row["candidate_name"]
+                mynet_url = row["myneta_url"]
+                mynet_cid = row["myneta_candidate_id"]
+
+                const_name_list = sorted(set(state_db_consts.values()))
+                matched_const_name = best_constituency_name_match(const_name_raw, const_name_list)
+                if not matched_const_name and _gemini_client:
+                    li = _llm_pick_option("constituency", const_name_raw, const_name_list)
+                    if li is not None:
+                        matched_const_name = const_name_list[li]
+                if not matched_const_name:
+                    unresolved += 1
+                    continue
+
+                constituency_id = next((k for k, v in state_db_consts.items() if v == matched_const_name), None)
+                if not constituency_id:
+                    unresolved += 1
+                    continue
+                cands_in_const = [c for c in state_db_cands if c["constituency_id"] == constituency_id]
+                if not cands_in_const:
+                    unresolved += 1
+                    continue
+
+                cand_names_in_seat = [c["name"] for c in cands_in_const]
+                matched_cand_name = intelligent_match(cand_name_raw, cand_names_in_seat)
+                if not matched_cand_name:
+                    best_c = None
+                    best_s = 0.0
+                    for c in cands_in_const:
+                        s = name_similarity(cand_name_raw, c["name"])
+                        if s > best_s:
+                            best_s = s
+                            best_c = c
+                    if best_c is not None and best_s >= 0.82:
+                        matched_cand_name = best_c["name"]
+                if not matched_cand_name and _gemini_client:
+                    ci = _llm_pick_option("candidate", cand_name_raw, cand_names_in_seat)
+                    if ci is not None:
+                        matched_cand_name = cand_names_in_seat[ci]
+                if not matched_cand_name:
+                    unresolved += 1
+                    continue
+
+                target_cand = next((c for c in cands_in_const if c["name"] == matched_cand_name), None)
+                if not target_cand:
+                    unresolved += 1
+                    continue
+                target_cand_id = target_cand["id"]
+
+                try:
+                    prof = fetch_myneta_profile(mynet_url, pw_page)
+                except Exception:
+                    prof = {}
+
+                criminal_cases = prof.get("criminal_cases")
+                if criminal_cases is None:
+                    criminal_cases = row.get("criminal_cases", 0)
+
+                education = prof.get("education_detail") or row.get("education") or ""
+
+                payload = {
+                    "criminal_cases": criminal_cases,
+                    "education": education,
+                    "assets_value": prof.get("assets_value", 0),
+                    "liabilities_value": prof.get("liabilities_value", 0),
+                    "myneta_url": mynet_url,
+                    "myneta_candidate_id": mynet_cid,
+                    "myneta_last_synced_at": _utc_now_iso(),
+                    "background": f"Data verified via ADR MyNeta. Candidate holds {prof.get('assets_value', 0)} INR in declared assets.",
+                }
+
+                db.table("candidates").update(payload).eq("id", target_cand_id).execute()
+                merged += 1
+
+            time.sleep(0.25)
+
+        ctx.close()
+        browser.close()
+
+    return {"state": cfg.get("name"), "merged": merged, "unresolved": unresolved, "error": None}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Dossier pipeline: ECI affidavit scrape + MyNeta enrichment.",
@@ -938,6 +1094,12 @@ def main() -> None:
         help="Show Chromium for MyNeta pages (default: headless).",
     )
     parser.add_argument(
+        "--myneta-workers",
+        type=int,
+        default=1,
+        help="Parallel workers for MyNeta enrichment (processes). Recommended: 1–3.",
+    )
+    parser.add_argument(
         "--cleanup-education",
         action="store_true",
         help="Sanitize corrupted candidates.education blobs in Supabase before running (safe).",
@@ -957,7 +1119,22 @@ def main() -> None:
         print("[mode] MyNeta enrichment only\n")
         if args.cleanup_education:
             cleanup_bad_education_fields(dry_run=args.cleanup_dry_run)
-        enrich_candidates_from_myneta(headless=not args.myneta_visible)
+        if int(args.myneta_workers or 1) <= 1:
+            enrich_candidates_from_myneta(headless=not args.myneta_visible)
+        else:
+            workers = max(1, min(int(args.myneta_workers), 3))
+            print(f"[+] MyNeta: running in parallel (workers={workers})", flush=True)
+            cfgs = list(MYNETA_CONFIG)
+            results = []
+            with ProcessPoolExecutor(max_workers=workers) as ex:
+                futs = [ex.submit(_myneta_worker_run, cfg, headless=not args.myneta_visible) for cfg in cfgs]
+                for fut in as_completed(futs):
+                    results.append(fut.result())
+                    r = results[-1]
+                    if r.get("error"):
+                        print(f"    [!] {r.get('state')}: {r.get('error')}", flush=True)
+                    else:
+                        print(f"    [OK] {r.get('state')}: Enriched={r.get('merged')} Unresolved={r.get('unresolved')}", flush=True)
         print("\n[OK] MYNETA SYNC COMPLETE.")
         return
 
@@ -979,7 +1156,22 @@ def main() -> None:
 
     if args.cleanup_education:
         cleanup_bad_education_fields(dry_run=args.cleanup_dry_run)
-    enrich_candidates_from_myneta(headless=not args.myneta_visible)
+    if int(args.myneta_workers or 1) <= 1:
+        enrich_candidates_from_myneta(headless=not args.myneta_visible)
+    else:
+        workers = max(1, min(int(args.myneta_workers), 3))
+        print(f"[+] MyNeta: running in parallel (workers={workers})", flush=True)
+        cfgs = list(MYNETA_CONFIG)
+        results = []
+        with ProcessPoolExecutor(max_workers=workers) as ex:
+            futs = [ex.submit(_myneta_worker_run, cfg, headless=not args.myneta_visible) for cfg in cfgs]
+            for fut in as_completed(futs):
+                results.append(fut.result())
+                r = results[-1]
+                if r.get("error"):
+                    print(f"    [!] {r.get('state')}: {r.get('error')}", flush=True)
+                else:
+                    print(f"    [OK] {r.get('state')}: Enriched={r.get('merged')} Unresolved={r.get('unresolved')}", flush=True)
     print("\n[OK] FULL DOSSIER PIPELINE COMPLETE (ECI + MyNeta).")
 
 
