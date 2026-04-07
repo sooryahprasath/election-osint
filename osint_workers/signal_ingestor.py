@@ -8,6 +8,8 @@ import os
 import sys
 import gc
 import urllib.parse
+import re
+import hashlib
 from datetime import datetime, timedelta, timezone
 from google import genai
 from googleapiclient.discovery import build
@@ -66,12 +68,21 @@ except Exception as e:
     supabase = None
 
 FEEDS = {
-    "ANI_News": "https://aninews.in/rss/national",
-    "Kerala": "https://news.google.com/rss/search?q=Kerala+Election+2026+when:1d&hl=en-IN&gl=IN&ceid=IN:en",
-    "Assam": "https://news.google.com/rss/search?q=Assam+Election+2026+when:1d&hl=en-IN&gl=IN&ceid=IN:en",
-    "Tamil_Nadu": "https://news.google.com/rss/search?q=Tamil+Nadu+Election+2026+when:1d&hl=en-IN&gl=IN&ceid=IN:en",
-    "West_Bengal": "https://news.google.com/rss/search?q=West+Bengal+Election+2026+when:1d&hl=en-IN&gl=IN&ceid=IN:en",
-    "Govt_Official": "https://news.google.com/rss/search?q=Election+Commission+OR+PIB+India+official+release+when:1d&hl=en-IN&gl=IN&ceid=IN:en"
+    # --- National & Official ---
+    "ANI_National": "https://aninews.in/rss/national",
+    "The_Hindu_National": "https://www.thehindu.com/news/national/feeder/default.rss",
+    "DD_News_National": "https://ddnews.gov.in/en/category/national/feed/",
+    "ECI_Official": "https://news.google.com/rss/search?q=Election+Commission+of+India+official+statement+when:1d&hl=en-IN&gl=IN&ceid=IN:en",
+
+    # --- State Specific (Election 2026) ---
+    "Tamil_Nadu": "https://news.google.com/rss/search?q=Tamil+Nadu+Election+2026+breaking+OR+alert+when:1d&hl=en-IN&gl=IN&ceid=IN:en",
+    "Kerala": "https://news.google.com/rss/search?q=Kerala+Election+2026+breaking+OR+alert+when:1d&hl=en-IN&gl=IN&ceid=IN:en",
+    "West_Bengal": "https://news.google.com/rss/search?q=West+Bengal+Election+2026+breaking+OR+alert+when:1d&hl=en-IN&gl=IN&ceid=IN:en",
+    "Assam": "https://news.google.com/rss/search?q=Assam+Election+2026+breaking+OR+alert+when:1d&hl=en-IN&gl=IN&ceid=IN:en",
+    "Puducherry": "https://news.google.com/rss/search?q=Puducherry+Election+2026+breaking+OR+alert+when:1d&hl=en-IN&gl=IN&ceid=IN:en",
+
+    # --- Crisis & Security Monitoring ---
+    "Security_Alerts": "https://news.google.com/rss/search?q=Election+violence+OR+booth+capture+OR+EVM+complaint+India+when:1d&hl=en-IN&gl=IN&ceid=IN:en"
 }
 
 # --- QUOTA & TIME MANAGEMENT ---
@@ -105,10 +116,11 @@ def get_election_context():
         return "PRE-POLL CAMPAIGN PHASE. Focus on rallies, manifesto promises, MCC violations, and candidate alliances."
 
 def extract_article_data(url, fallback_html):
-    full_text, image_url = "", ""
+    full_text, image_url, final_url = "", "", url
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         res = requests.get(url, headers=headers, timeout=10, allow_redirects=True)
+        final_url = res.url or url
         soup = BeautifulSoup(res.content, 'html.parser')
         full_text = " ".join([p.text for p in soup.find_all('p')])
         og_image = soup.find('meta', property='og:image')
@@ -118,12 +130,157 @@ def extract_article_data(url, fallback_html):
     if len(full_text) < 100 and fallback_html:
         full_text = BeautifulSoup(fallback_html, 'html.parser').get_text(separator=' ')
         
-    return full_text[:3000], image_url
+    return full_text[:3000], image_url, final_url
 
 
 def _norm_title(t: str) -> str:
     return " ".join((t or "").strip().lower().split())
 
+
+_TRACKING_QUERY_KEYS = {
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_term",
+    "utm_content",
+    "utm_id",
+    "utm_name",
+    "utm_reader",
+    "utm_viz_id",
+    "utm_pubreferrer",
+    "gclid",
+    "dclid",
+    "fbclid",
+    "igshid",
+    "mc_cid",
+    "mc_eid",
+    "ref",
+    "referrer",
+    "ref_src",
+    "source",
+    "src",
+    "cmpid",
+    "cmp",
+    "mkt_tok",
+    "spm",
+    "_ga",
+    "ocid",
+}
+
+
+def _canonical_url(u: str) -> str:
+    """
+    Canonicalize URLs for hard dedupe.
+    - lowercases scheme/host
+    - removes fragments
+    - removes common tracking params
+    - normalizes default ports
+    - sorts remaining query params
+    - strips trailing slash from path
+    """
+    raw = (u or "").strip()
+    if not raw:
+        return ""
+    try:
+        p = urllib.parse.urlparse(raw)
+        scheme = (p.scheme or "https").lower()
+        netloc = (p.netloc or "").lower()
+        if not netloc and p.path and "://" not in raw:
+            # Sometimes feeds give schemeless URLs; treat as https.
+            p = urllib.parse.urlparse("https://" + raw)
+            scheme = (p.scheme or "https").lower()
+            netloc = (p.netloc or "").lower()
+
+        # Remove default ports
+        if netloc.endswith(":80") and scheme == "http":
+            netloc = netloc[:-3]
+        if netloc.endswith(":443") and scheme == "https":
+            netloc = netloc[:-4]
+
+        # Normalize host common prefix
+        if netloc.startswith("www."):
+            netloc = netloc[4:]
+
+        path = (p.path or "").strip()
+        path = re.sub(r"/{2,}", "/", path)
+        if path != "/":
+            path = path.rstrip("/")
+
+        # Query: remove tracking keys, keep stable keys, sort
+        q = urllib.parse.parse_qsl(p.query or "", keep_blank_values=False)
+        q2 = []
+        for k, v in q:
+            lk = (k or "").lower()
+            if lk in _TRACKING_QUERY_KEYS:
+                continue
+            if not lk:
+                continue
+            q2.append((lk, v))
+        q2.sort()
+        query = urllib.parse.urlencode(q2, doseq=True)
+
+        # Drop fragments
+        return urllib.parse.urlunparse((scheme, netloc, path, "", query, ""))
+    except Exception:
+        return raw.lower()
+
+
+def _extract_youtube_id(u: str) -> str | None:
+    raw = (u or "").strip()
+    if not raw:
+        return None
+    try:
+        p = urllib.parse.urlparse(raw)
+        host = (p.netloc or "").lower()
+        path = p.path or ""
+        if host.startswith("www."):
+            host = host[4:]
+
+        # youtu.be/<id>
+        if host == "youtu.be":
+            vid = path.strip("/").split("/")[0]
+            return vid or None
+
+        if host.endswith("youtube.com") or host.endswith("youtube-nocookie.com"):
+            # /watch?v=<id>
+            qs = urllib.parse.parse_qs(p.query or "")
+            if "v" in qs and qs["v"]:
+                return qs["v"][0]
+
+            # /shorts/<id>, /embed/<id>
+            m = re.match(r"^/(shorts|embed)/([^/?#]+)", path)
+            if m:
+                return m.group(2)
+    except Exception:
+        return None
+    return None
+
+
+def _simhash64(text: str) -> int:
+    """
+    Small, dependency-free simhash for near-duplicate detection.
+    """
+    s = " ".join((text or "").lower().split())
+    if not s:
+        return 0
+    tokens = re.findall(r"[a-z0-9]{2,}", s)
+    if not tokens:
+        return 0
+    v = [0] * 64
+    for tok in tokens[:800]:
+        h = hashlib.md5(tok.encode("utf-8")).digest()[:8]
+        x = int.from_bytes(h, "big", signed=False)
+        for i in range(64):
+            v[i] += 1 if (x >> i) & 1 else -1
+    out = 0
+    for i in range(64):
+        if v[i] > 0:
+            out |= 1 << i
+    return out
+
+
+def _hamming64(a: int, b: int) -> int:
+    return (a ^ b).bit_count()
 
 def _norm_url(u: str) -> str:
     try:
@@ -237,7 +394,8 @@ def analyze_and_insert(source_title, source_url, original_title, full_text, imag
 
         row = {
             "source": source_title,
-            "source_url": source_url,
+            # Store canonical URL to ensure stable hard-dedupe across runs.
+            "source_url": _canonical_url(source_url),
             "image_url": image_url,
             "video_url": video_url,
             "title": original_title,
@@ -282,13 +440,20 @@ def generate_ai_briefing():
     
     prompt = f"""
     You are a Chief Intelligence Officer. {election_context}
-    Write a 4-paragraph tactical briefing based ONLY on these signals from the last 24 hours.
+    Write a 7-point tactical briefing based ONLY on these signals from the last 24 hours.
     STRICT RULES:
     1. Maximum 15 words per body text. Be crisp and military style.
     2. Try to cover key developments in TN, WB, AS, KL, PY if data exists.
+    3. Headings must be short, consistent, and actionable.
     
     Return pure JSON:[
-      {{"heading": "West Bengal:", "body": "CAPF deployed. High tension. Clashes expected.", "color_hex": "#dc2626"}}
+      {{"heading": "National overview", "body": "…", "color_hex": "#16a34a"}},
+      {{"heading": "Hotspots", "body": "…", "color_hex": "#dc2626"}},
+      {{"heading": "Turnout / logistics", "body": "…", "color_hex": "#0284c7"}},
+      {{"heading": "Violence / violations", "body": "…", "color_hex": "#ea580c"}},
+      {{"heading": "Misinformation watch", "body": "…", "color_hex": "#a855f7"}},
+      {{"heading": "Key actors", "body": "…", "color_hex": "#16a34a"}},
+      {{"heading": "Next 24h watchlist", "body": "…", "color_hex": "#0284c7"}}
     ]
     Signals: {json.dumps(recent_signals)}
     """
@@ -333,12 +498,15 @@ def fetch_and_ingest():
 
     seen_titles: set[str] = set()
     seen_urls: set[str] = set()
+    seen_uids: set[str] = set()
+    # simhashes within a recent window to reduce near-duplicate noise
+    recent_hashes: list[tuple[int, datetime]] = []
     if supabase:
         try:
             since = (datetime.now(IST) - timedelta(days=3)).isoformat()
             recent = (
                 supabase.table("signals")
-                .select("title,source_url")
+                .select("title,body,source_url,created_at")
                 .gte("created_at", since)
                 .limit(1200)
                 .execute()
@@ -347,7 +515,19 @@ def fetch_and_ingest():
                 if row.get("title"):
                     seen_titles.add(_norm_title(row["title"]))
                 if row.get("source_url"):
-                    seen_urls.add(_norm_url(row["source_url"]))
+                    cu = _canonical_url(row["source_url"])
+                    if cu:
+                        seen_urls.add(cu)
+                        seen_uids.add(f"url:{cu}")
+                created_at = row.get("created_at")
+                try:
+                    ts = datetime.fromisoformat(created_at.replace("Z", "+00:00")) if created_at else None
+                except Exception:
+                    ts = None
+                if ts:
+                    h = _simhash64(f"{row.get('title') or ''} {row.get('body') or ''}")
+                    if h:
+                        recent_hashes.append((h, ts))
         except Exception as e:
             print(f"   [dedupe] could not load recent signals: {e}")
 
@@ -359,8 +539,15 @@ def fetch_and_ingest():
                 link = entry.link or ""
 
                 nt = _norm_title(title)
-                nu = _norm_url(link)
-                if nt in seen_titles or (nu and nu in seen_urls):
+                cu = _canonical_url(link)
+                yid = _extract_youtube_id(link)
+                uid = f"yt:{yid}" if yid else (f"url:{cu}" if cu else "")
+
+                if nt in seen_titles:
+                    continue
+                if uid and uid in seen_uids:
+                    continue
+                if cu and cu in seen_urls:
                     continue
                 summary_html = getattr(entry, 'summary', '')
                 source_name = getattr(entry.source, 'title', 'News') if hasattr(entry, 'source') else "News Network"
@@ -372,13 +559,45 @@ def fetch_and_ingest():
                     continue
 
                 print(f"-> Found: {title[:60]}...")
-                full_text, image_url = extract_article_data(link, summary_html)
+                full_text, image_url, final_url = extract_article_data(link, summary_html)
+                final_cu = _canonical_url(final_url)
+                final_yid = _extract_youtube_id(final_url)
+                final_uid = f"yt:{final_yid}" if final_yid else (f"url:{final_cu}" if final_cu else uid)
+
+                # Soft dedupe: near-duplicate guard within ~12 hours.
+                now = datetime.now(timezone.utc)
+                incoming_h = _simhash64(f"{title} {BeautifulSoup(summary_html, 'html.parser').get_text(' ')[:600]}")
+                if incoming_h:
+                    window_start = now - timedelta(hours=12)
+                    for h, ts in recent_hashes[-600:]:
+                        if ts < window_start:
+                            continue
+                        if _hamming64(incoming_h, h) <= 3:
+                            # Near-duplicate of something recent — skip.
+                            continue_flag = True
+                            break
+                    else:
+                        continue_flag = False
+                    if continue_flag:
+                        continue
+
+                # Hard dedupe: ensure we key by canonicalized final URL (post-redirects).
+                if final_uid and final_uid in seen_uids:
+                    continue
+                if final_cu and final_cu in seen_urls:
+                    continue
+
                 if len(full_text) > 50:
-                    ok = analyze_and_insert(source_name, link, title, full_text, image_url, state_name, valid_c_ids)
+                    ok = analyze_and_insert(source_name, final_url or link, title, full_text, image_url, state_name, valid_c_ids)
                     if ok:
                         seen_titles.add(nt)
-                        if nu:
-                            seen_urls.add(nu)
+                        if final_cu:
+                            seen_urls.add(final_cu)
+                            seen_uids.add(f"url:{final_cu}")
+                        if final_uid:
+                            seen_uids.add(final_uid)
+                        if incoming_h:
+                            recent_hashes.append((incoming_h, datetime.now(timezone.utc)))
                     
         except Exception: pass
         gc.collect() 

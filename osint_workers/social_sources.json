@@ -1,0 +1,184 @@
+{
+  "telegram_channels": [
+    {
+      "key": "eci_official",
+      "handle": "ECISVEEP",
+      "kind": "tier_a_official",
+      "notes": "Replace with the real Telegram handle(s) you want.",
+      "enabled": false
+    }
+  ],
+  "youtube_channels": [
+    {
+      "key": "inc_youtube",
+      "channel_id": "UCjfYRVmU3JrKN78mLJHHUPQ",
+      "handle": "@IndianNationalCongress",
+      "kind": "tier_a_official",
+      "enabled": true
+    },
+    {
+      "key": "bjp_youtube",
+      "channel_id": "UCrwE8kVqtIUVUzKui2WVpuQ",
+      "handle": "@bjp",
+      "kind": "tier_a_official",
+      "enabled": true
+    },
+    {
+      "key": "cpim_youtube",
+      "channel_id": "UCSLVNnh2GY1Mr-uK0l8q0WA",
+      "handle": "@CPIMarxist",
+      "kind": "tier_a_official",
+      "enabled": true
+    },
+    {
+      "key": "suci_wb_youtube",
+      "channel_id": "UC0OYxig1Jx1tB6lKBLtay0w",
+      "handle": "@sucicwestbengal",
+      "kind": "tier_a_official",
+      "enabled": true
+    },
+    {
+      "key": "aap_youtube",
+      "channel_id": "UCZRtpY_4t1bJ1cafVwpTp_A",
+      "handle": "@AamAadmiParty",
+      "kind": "tier_a_official",
+      "enabled": true
+    },
+    {
+      "key": "dmk_youtube",
+      "channel_id": "UCU3vZv9cZGF0DC_oO_mJ6-Q",
+      "handle": "@thedmkofficial",
+      "kind": "tier_a_official",
+      "enabled": true
+    },
+    {
+      "key": "aiadmk_youtube",
+      "channel_id": "UCZozX1aaOMiaexDyMLS7kog",
+      "handle": "@AIADMKofficial",
+      "kind": "tier_a_official",
+      "enabled": true
+    },
+    {
+      "key": "tvk_youtube",
+      "channel_id": "UCGZHc6wDJFjeNAAJhatSDXg",
+      "handle": "@TVKVijayHQ-Offl",
+      "kind": "tier_a_official",
+      "enabled": true
+    },
+    {
+      "key": "ani_youtube",
+      "channel_id": "UCoRpKmC6a-DdEa1ohxlCgUA",
+      "handle": "@ANINewsIndia",
+      "kind": "tier_a_media",
+      "enabled": true
+    },
+    {
+      "key": "pti_youtube",
+      "channel_id": "UCJ5gGTLrAeXFyOmooAEH7zw",
+      "handle": "@PTI_News",
+      "kind": "tier_a_media",
+      "enabled": true
+    },
+    {
+      "key": "federal_youtube",
+      "channel_id": "UC1KT34Dh1uVMRV960wElzqg",
+      "handle": "@TheFederal",
+      "kind": "tier_a_media",
+      "enabled": true
+    },
+    {
+      "key": "polimer_youtube",
+      "channel_id": "UC8Z-VjXBtDJTvq6aqkIskPg",
+      "handle": "@PolimerNews",
+      "kind": "tier_a_media",
+      "enabled": true
+    },
+    {
+      "key": "aitc_youtube",
+      "channel_id": "UCFXQHOWfhkFSUvKgaV2ZSRw",
+      "handle": "@AITCOfficialYouTube",
+      "kind": "tier_a_official",
+      "enabled": true
+    },
+    {
+      "key": "indianexpress_youtube",
+      "channel_id": "UCtSKzRD5c2I2HmfAz3F8zoA",
+      "handle": "@indianexpress",
+      "kind": "tier_a_media",
+      "enabled": true
+    },
+    {
+      "key": "marunadan_youtube",
+      "channel_id": "UCpp_oKgF30vkhF1WDcX64mg",
+      "handle": "@marunadanmalayali8276",
+      "kind": "tier_a_media",
+      "enabled": true
+    },
+    {
+      "key": "mathrubhumi_youtube",
+      "channel_id": "UC09eWekVDztdoRUS-s3CQ7A",
+      "handle": "@TVMathrubhumi",
+      "kind": "tier_a_media",
+      "enabled": true
+    },
+    {
+      "key": "manorama_youtube",
+      "channel_id": "UCP0uG-mcMImgKnJz-VjJZmQ",
+      "handle": "@manoramanews",
+      "kind": "tier_a_media",
+      "enabled": true
+    },
+    {
+      "key": "eastmojo_youtube",
+      "channel_id": "UC3zMA8hCzeB8ldnFVGX1NFA",
+      "handle": "@EastMojoOfficial",
+      "kind": "tier_a_media",
+      "enabled": true
+    },
+    {
+      "key": "assamtribune_youtube",
+      "channel_id": "UCN2Ner4t3iDGeCURGSVfKQw",
+      "handle": "@TheAssamTribuneOff",
+      "kind": "tier_a_media",
+      "enabled": true
+    },
+    {
+      "key": "abpananda_youtube",
+      "channel_id": "UCRWFSbif-RFENbBrSiez1DA",
+      "handle": "@abpanandatv",
+      "kind": "tier_a_media",
+      "enabled": true
+    },
+    {
+      "key": "news18bangla_youtube",
+      "channel_id": "UCbf0XHULBkTfv2hBjaaDw9Q",
+      "handle": "@News18Bangla",
+      "kind": "tier_a_media",
+      "enabled": true
+    },
+    {
+      "key": "thewall_youtube",
+      "channel_id": "UCxA6gGWmlFSH09E3qkvr-rQ",
+      "handle": "@TheWallNews",
+      "kind": "tier_a_media",
+      "enabled": true
+    },
+    {
+      "key": "puthiyathalaimurai_youtube",
+      "channel_id": "UCmyKnNRH0wH-r8I-ceP-dsg",
+      "handle": "@PuthiyaThalaimuraiTV",
+      "kind": "tier_a_media",
+      "enabled": true
+    }
+  ],
+  "rss_feeds": [
+    {
+      "key": "pib_press",
+      "url": "https://pib.gov.in/RssMain.aspx?ModId=6&Lang=1&Regid=3",
+      "handle": "PIB India",
+      "kind": "tier_a_official",
+      "enabled": false
+    }
+  ]
+}
+
