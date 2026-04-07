@@ -15,7 +15,12 @@ const IndiaFlagIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-export default function TopBar() {
+type TopBarProps = {
+  /** Opens the signal detail modal when user taps a ticker headline (desktop + mobile). */
+  onSelectTickerSignal?: (signal: any) => void;
+};
+
+export default function TopBar({ onSelectTickerSignal }: TopBarProps) {
   const [mounted, setMounted] = useState(false);
   const [countdown, setCountdown] = useState(getNextElectionEvent());
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -122,7 +127,12 @@ export default function TopBar() {
             >
               <div className="flex shrink-0 pr-8">
                 {displayedSignals.map((h: any, i: number) => (
-                  <span key={`news-${h.id || i}`} className="inline-flex items-center mr-8">
+                  <button
+                    key={`news-${h.id || i}`}
+                    type="button"
+                    className="inline-flex items-center mr-8 cursor-pointer rounded-sm border-0 bg-transparent p-0 text-left font-mono hover:bg-zinc-100/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0284c7] focus-visible:ring-offset-1"
+                    onClick={() => onSelectTickerSignal?.(h)}
+                  >
                     {h.severity >= 4 ? (
                       <AlertTriangle className="h-3 w-3 text-[#dc2626] mr-1 shrink-0" />
                     ) : h.category?.toLowerCase() === 'official' ? (
@@ -135,7 +145,7 @@ export default function TopBar() {
                       [{h.state ? h.state.toUpperCase() : "INDIA"}]
                     </span>
                     <span className="text-[#27272a]">{h.title}</span>
-                  </span>
+                  </button>
                 ))}
               </div>
             </div>

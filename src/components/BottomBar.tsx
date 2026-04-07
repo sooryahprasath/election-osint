@@ -28,7 +28,7 @@ export default function BottomBar() {
 
   return (
     <>
-      <footer className="fixed bottom-0 left-0 right-0 z-50 flex h-7 items-center justify-between border-t border-[#e4e4e7] bg-[#ffffff] px-3 font-mono text-[10px] select-none">
+      <footer className="fixed bottom-0 left-0 right-0 z-50 hidden h-7 items-center justify-between border-t border-[#e4e4e7] bg-[#ffffff] px-3 font-mono text-[10px] select-none md:flex">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-1">
             <Wifi className="h-3 w-3 text-[#16a34a]" />
@@ -75,7 +75,7 @@ export default function BottomBar() {
       </footer>
 
       {showDevMenu && ENABLE_DEV_MENU && (
-        <div className="fixed bottom-[32px] right-2 bg-white border border-[#e4e4e7] rounded-lg shadow-xl p-3 w-[min(22rem,calc(100vw-1rem))] z-[60] animate-fade-in-up max-h-[70vh] overflow-y-auto">
+        <div className="fixed bottom-2 right-2 md:bottom-[32px] bg-white border border-[#e4e4e7] rounded-lg shadow-xl p-3 w-[min(22rem,calc(100vw-1rem))] z-[60] animate-fade-in-up max-h-[70vh] overflow-y-auto">
           <div className="flex justify-between items-center mb-2 border-b border-[#e4e4e7] pb-1">
             <span className="font-mono text-[10px] font-bold text-[#dc2626] flex items-center gap-1">
               <Clock className="h-3 w-3" /> DEV / WAR ROOM

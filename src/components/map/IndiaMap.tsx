@@ -27,7 +27,7 @@ const STATE_CODES: Record<string, string> = {
   "Mizoram": "MZ", "Nagaland": "NL", "Orissa": "OD", "Puducherry": "PY",
   "Punjab": "PB", "Rajasthan": "RJ", "Sikkim": "SK", "Tamil Nadu": "TN",
   "Telangana": "TG", "Tripura": "TR", "Uttar Pradesh": "UP", "Uttaranchal": "UT",
-  "West Bengal": "WB", "Ladakh": "LA"
+  "West Bengal": "WB", "Ladakh": "LA", "Lakshadweep": "LD", "Dādra and Nagar Haveli and Damān and Diu": "DD/DN"
 };
 
 const PARTY_COLORS: Record<string, string> = {
@@ -78,6 +78,8 @@ export interface IndiaMapProps {
   onSelectState?: (state: string) => void;
   onSelectSignal?: (signal: any) => void;
   resetTrigger?: number;
+  /** Increment (from parent) to snap camera to default framing for the current state view without going national. */
+  stateViewSnapTrigger?: number;
   onZoomChange?: (zoom: number) => void;
   overlayMode?: "VIDEOS" | "ALL";
   verifiedOnly?: boolean;
@@ -106,6 +108,7 @@ export default function IndiaMap({
   onSelectState,
   onSelectSignal,
   resetTrigger,
+  stateViewSnapTrigger = 0,
   onZoomChange,
   overlayMode = "VIDEOS",
   verifiedOnly = false,
@@ -203,6 +206,19 @@ export default function IndiaMap({
     setPosition(snap);
     releaseSuppressMoveEndSoon();
   }, [resetTrigger]);
+
+  useEffect(() => {
+    if (stateViewSnapTrigger === undefined || stateViewSnapTrigger < 1) return;
+    const view = currentView;
+    if (view === "India") return;
+    suppressMoveEndRef.current = true;
+    const snap = { coordinates: getCenterCoords(view) as [number, number], zoom: 1 };
+    positionRef.current = snap;
+    setPosition(snap);
+    onZoomChangeRef.current?.(1);
+    releaseSuppressMoveEndSoon();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to parent snap trigger bumps, not view switches
+  }, [stateViewSnapTrigger]);
 
   const isFirstViewLerp = useRef(true);
   /**
@@ -443,7 +459,7 @@ export default function IndiaMap({
       {!hideMapChrome && (
       <div
         ref={mapLayersWrapRef}
-        className="absolute bottom-16 right-2 z-[55] flex flex-col items-end gap-1.5 pointer-events-auto select-none max-md:bottom-[4.75rem] md:bottom-3 md:right-[292px] md:z-40"
+        className="absolute bottom-16 right-2 z-[55] flex flex-col items-end gap-1.5 pointer-events-auto select-none max-md:bottom-[6.75rem] md:bottom-3 md:right-[292px] md:z-40"
       >
         {mapLayersOpen && (
           <div
@@ -502,7 +518,7 @@ export default function IndiaMap({
       )}
 
       {!hideMapChrome && (
-      <div className="pointer-events-none absolute bottom-16 left-2 z-[55] max-w-[9.5rem] select-none max-md:bottom-[4.75rem] md:bottom-3 md:left-[292px] md:z-30 md:max-w-[13rem]">
+      <div className="pointer-events-none absolute bottom-16 left-2 z-[55] max-w-[9.5rem] select-none max-md:bottom-[6.75rem] md:bottom-3 md:left-[292px] md:z-30 md:max-w-[13rem]">
         <div className="rounded-md border border-[#e4e4e7]/80 bg-white/85 px-2 py-1 shadow-sm backdrop-blur-sm">
           <div className="mb-0.5 font-mono text-[7px] font-bold tracking-wider text-[#71717a]">LEGEND</div>
           {operationMode === "VOTING_DAY" ? (
