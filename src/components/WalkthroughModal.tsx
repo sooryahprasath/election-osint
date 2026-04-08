@@ -12,7 +12,7 @@ export default function WalkthroughModal() {
   useEffect(() => {
     try {
       const seen = window.localStorage.getItem(KEY);
-      if (!seen) setOpen(true);
+      if (!seen) queueMicrotask(() => setOpen(true));
     } catch {
       // ignore
     }

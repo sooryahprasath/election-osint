@@ -18,10 +18,12 @@ export function CenterModeSwitcher({
   value,
   onChange,
   showLive,
+  liveLabel,
 }: {
   value: CenterMode;
   onChange: (mode: CenterMode) => void;
   showLive?: boolean;
+  liveLabel?: string;
 }) {
   const modes: CenterMode[] = showLive ? ["live", "signals", "videos", "map"] : ["signals", "videos", "map"];
   return (
@@ -30,6 +32,7 @@ export function CenterModeSwitcher({
         const meta = MODE_META[mode];
         const active = value === mode;
         const Icon = meta.Icon;
+        const label = mode === "live" && liveLabel ? liveLabel : meta.label;
         return (
           <button
             key={mode}
@@ -45,7 +48,7 @@ export function CenterModeSwitcher({
             aria-pressed={active}
           >
             <Icon className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">{meta.label}</span>
+            <span className="hidden sm:inline">{label}</span>
           </button>
         );
       })}

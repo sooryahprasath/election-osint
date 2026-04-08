@@ -13,6 +13,8 @@ interface LiveDataContextProps {
   exitPolls: any[];
   liveResults: any[];
   isConnected: boolean;
+  refreshSignals: () => Promise<void>;
+  refreshWarRoom: () => Promise<void>;
   simulatedDate: Date | null;
   setSimulatedDate: (date: Date | null) => void;
   operationMode: string;
@@ -22,6 +24,8 @@ interface LiveDataContextProps {
 const LiveDataContext = createContext<LiveDataContextProps>({
   constituencies: [], candidates: [], signals: [], turnoutData: [], exitPolls: [], liveResults: [],
   isConnected: false, simulatedDate: null, setSimulatedDate: () => { },
+  refreshSignals: async () => { },
+  refreshWarRoom: async () => { },
   operationMode: "PRE-POLL", setOperationMode: () => { },
 });
 
@@ -104,19 +108,24 @@ export const LiveDataProvider = ({ children }: { children: React.ReactNode }) =>
 
     loadVanguardData().then(() => loadHeavyData());
 
+    const refreshSignals = async () => {
+      if (!isMounted) return;
+      const { data } = await supabase
+        .from("signals")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(SIGNALS_PAGE_SIZE);
+      if (data && data.length > 0) {
+        setSignals((prev) => mergeSignalsNewestFirst(data, prev));
+      }
+    };
+
     // 2B. SAFETY NET: If realtime drops or is blocked, poll latest signals.
     // This ensures the Intelligence feed updates without a full page refresh.
     const signalsPoller = setInterval(async () => {
       if (!isMounted) return;
       try {
-        const { data } = await supabase
-          .from("signals")
-          .select("*")
-          .order("created_at", { ascending: false })
-          .limit(SIGNALS_PAGE_SIZE);
-        if (data && data.length > 0) {
-          setSignals((prev) => mergeSignalsNewestFirst(data, prev));
-        }
+        await refreshSignals();
       } catch {
         // silent: realtime error logging already exists below
       }
@@ -214,6 +223,34 @@ export const LiveDataProvider = ({ children }: { children: React.ReactNode }) =>
       exitPolls,
       liveResults,
       isConnected,
+      refreshSignals: async () => {
+        const { data } = await supabase
+          .from("signals")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(SIGNALS_PAGE_SIZE);
+        if (data && data.length > 0) {
+          setSignals((prev) => {
+            const byId = new Map<string, any>();
+            for (const s of data) byId.set(String(s.id), s);
+            for (const s of prev) {
+              const id = String(s.id);
+              if (!byId.has(id)) byId.set(id, s);
+            }
+            const merged = Array.from(byId.values());
+            merged.sort((a, b) => (Date.parse(b.created_at || "") || 0) - (Date.parse(a.created_at || "") || 0));
+            return merged.slice(0, SIGNALS_PAGE_SIZE);
+          });
+        }
+      },
+      refreshWarRoom: async () => {
+        const [tRes, eRes] = await Promise.all([
+          supabase.from("voter_turnout").select("*"),
+          supabase.from("exit_polls").select("*"),
+        ]);
+        if (tRes.data) setTurnoutData(tRes.data);
+        if (eRes.data) setExitPolls(eRes.data);
+      },
       simulatedDate,
       setSimulatedDate,
       operationMode,
