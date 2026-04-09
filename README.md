@@ -125,7 +125,7 @@ sequenceDiagram
 | Layer | What runs | Where it lands | Notes |
 |--------|-----------|----------------|--------|
 | **Geography seed** | `bulk_seed_constituencies.py` | `constituencies` | Scrapes Wikipedia tables; uses Gemini to structure rows + approximate centroids. Run before dossiers if IDs must exist. |
-| **Dossier** | `dossier_ingestor.py` | `candidates` | Playwright + BeautifulSoup on **affidavit.eci.gov.in**; then MyNeta HTML enrichment and fuzzy name matching. If live upstreams are unavailable for a state, the worker can fall back to repo-tracked rows in `candidate_fallback_seed.csv`. Marks stale rows `removed` when absent from latest source pass. |
+| **Dossier** | `dossier_ingestor.py` | `candidates` | Playwright + BeautifulSoup on **affidavit.eci.gov.in**; then MyNeta HTML enrichment and fuzzy name matching. Marks stale rows `removed` when absent from latest ECI pass. |
 | **Signals** | `signal_ingestor.py` | `signals`, `briefings` | Multi-feed RSS; Gemini (`google-genai`) for extraction; optional YouTube attachment when `YOUTUBE_API_KEY` is set. Prunes old signals (24h policy in code—check script). |
 | **Volatility** | `intel_ingestor.py` | `constituencies.volatility_score` | Deterministic 0–100 index from contest size, criminal-case caps, and recent signal severity (14-day lookback). |
 | **Voting day** | `voting_day_ingestor.py` | `voter_turnout`, `exit_polls`, related | Scheduled IST windows: turnout + exit-poll style ingestion from news RSS and LLM passes. |
@@ -227,20 +227,6 @@ Create **`.env`** in the **repository root** (same level as `package.json`). Wor
 | `NEXT_PUBLIC_OPERATION_MODE` | Optional | UI mode string (default `PRE-POLL`) |
 
 **Next.js** also reads `.env.local` if you prefer splitting secrets; workers still expect root `.env` unless you change paths in scripts.
-
-Manual fallback candidate rows can be added to [candidate_fallback_seed.csv](C:/Users/ajinf/Documents/PycharmProjects/election-osint/candidate_fallback_seed.csv) when official state candidate databases are blocked or not live yet. Expected columns are:
-
-| Column | Required | Notes |
-|--------|----------|-------|
-| `state_prefix` | Yes | `KER`, `ASM`, `PY`, `TN`, `WB`, etc. |
-| `constituency_name` | Yes | Matched fuzzily against `constituencies.name`. |
-| `candidate_name` | Yes | Used to generate the candidate row id. |
-| `party` | No | Party display name. |
-| `party_abbreviation` | No | Optional short form. |
-| `incumbent` | No | `true` / `false`. |
-| `source_url` | No | Official party / EC / announcement URL. |
-| `source_label` | No | Short provenance note stored with the candidate. |
-| `nomination_status` | No | Defaults to `manual_seed`. |
 
 Example (placeholders only):
 
