@@ -9,6 +9,13 @@ export const ELECTION_DATES = {
   counting: new Date("2026-05-04T08:00:00+05:30"),
 };
 
+/** ECI-style exit-poll broadcast embargo: UI + ingest stay dark until this instant (IST). */
+export const EXIT_POLL_EMBARGO_LIFT_IST = new Date("2026-04-29T19:00:00+05:30");
+
+export function isExitPollEmbargoActive(now: Date = new Date()): boolean {
+  return now.getTime() < EXIT_POLL_EMBARGO_LIFT_IST.getTime();
+}
+
 export interface CountdownResult {
   days: number;
   hours: number;

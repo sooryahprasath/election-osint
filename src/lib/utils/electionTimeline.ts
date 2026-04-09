@@ -99,13 +99,20 @@ export function getMacroProgress01(now: Date, operationMode: string): number {
   return Math.min(1, base + span * 0.85 * intra);
 }
 
-const WAR_ORDER: WarRoomPhase[] = ["QUIET", "TURNOUT_LIVE", "TURNOUT_FINAL", "EXIT_POLL"];
+const WAR_ORDER: WarRoomPhase[] = [
+  "QUIET",
+  "TURNOUT_LIVE",
+  "TURNOUT_FINAL",
+  "EXIT_POLL_EMBARGO",
+  "EXIT_POLL",
+];
 
 const INTRADAY_META: { war: WarRoomPhase; label: string; sub: string }[] = [
   { war: "QUIET", label: "Pre-open", sub: "02:00–07:00 IST" },
   { war: "TURNOUT_LIVE", label: "Live turnout", sub: "07:00–18:30" },
-  { war: "TURNOUT_FINAL", label: "Final pass", sub: "18:30–19:15" },
-  { war: "EXIT_POLL", label: "Exit polls", sub: "19:15–02:00" },
+  { war: "TURNOUT_FINAL", label: "Final pass", sub: "18:30–19:00" },
+  { war: "EXIT_POLL_EMBARGO", label: "Embargo", sub: "until 29 Apr 19:00" },
+  { war: "EXIT_POLL", label: "Exit polls", sub: "19:00–02:00" },
 ];
 
 /** Intraday rhythm on a scheduled polling day (matches voting_day_ingestor windows). */
@@ -162,15 +169,23 @@ export function getIntradayWarSteps(now: Date, isPollingCalendarDay: boolean, wa
       const h = Math.floor(minsLeft / 60);
       const minRem = minsLeft % 60;
       const timeLeft = h > 0 ? `${h}h ${minRem}m` : `${minsLeft} min`;
-      headline = `Final official turnout pass (18:30–19:15 IST) — about ${timeLeft} until exit-poll window opens.`;
+      headline = `Final official turnout pass (18:30–19:00 IST) — about ${timeLeft} until exit-poll window opens.`;
     }
+  } else if (warPhase === "EXIT_POLL_EMBARGO") {
+    if (m >= tExit) {
+      segmentPct = Math.max(0, Math.min(1, (m - tExit) / Math.max(1, 24 * 60 - tExit)));
+    } else {
+      segmentPct = Math.max(0, Math.min(1, m / Math.max(1, tQuiet)));
+    }
+    headline =
+      "Exit-poll broadcast under embargo until 29 Apr 2026, 19:00 IST — no public seat bands until lift (Phase 2B / West Bengal).";
   } else if (warPhase === "EXIT_POLL") {
     if (m >= tExit) {
       segmentPct = Math.max(0, Math.min(1, (m - tExit) / Math.max(1, 24 * 60 - tExit)));
     } else {
       segmentPct = Math.max(0, Math.min(1, m / Math.max(1, tQuiet)));
     }
-    headline = "Exit-poll broadcast window (19:15 IST onward).";
+    headline = "Exit-poll broadcast window (19:00 IST onward).";
   } else if (warPhase === "QUIET") {
     segmentPct = Math.max(0, Math.min(1, (m - tQuiet) / Math.max(1, t7 - tQuiet)));
     const minsUntilOpen = Math.max(0, t7 - m);

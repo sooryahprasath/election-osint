@@ -111,8 +111,15 @@ export default function BottomBar() {
             <button type="button" onClick={() => { setSimulatedDate(IST("2026-04-09T18:45:00+05:30")); setOperationMode("VOTING_DAY"); }} className="text-left py-1.5 px-2 hover:bg-[#fffbeb] rounded text-[#b45309] border border-[#fef3c7]">
               18:45 IST — final turnout pass
             </button>
-            <button type="button" onClick={() => { setSimulatedDate(IST("2026-04-09T20:00:00+05:30")); setOperationMode("VOTING_DAY"); }} className="text-left py-1.5 px-2 hover:bg-[#fff7ed] rounded text-[#c2410c] border border-[#ffedd5]">
-              20:00 IST — exit poll tab
+            <button
+              type="button"
+              onClick={() => {
+                setSimulatedDate(IST("2026-04-29T19:30:00+05:30"));
+                setOperationMode("VOTING_DAY");
+              }}
+              className="text-left py-1.5 px-2 hover:bg-[#fff7ed] rounded text-[#c2410c] border border-[#ffedd5]"
+            >
+              29 Apr 19:30 IST — exit poll tab (embargo lifted)
             </button>
           </div>
 

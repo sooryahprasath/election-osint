@@ -3,8 +3,8 @@ DHARMA-OSINT — Voting day / exit-poll autonomous ingestor (IST).
 
 Schedule (polling calendar days only — see PHASE_STATES):
   07:00–18:30  Live turnout + booth news (default: Gemini + Google Search grounding).
-  18:30–19:15  Final turnout pass (same pipeline, flagged as FINAL in time_slot).
-  19:15–02:00  Exit-poll aggregation from multiple outlets (RSS + LLM).
+  18:30–19:00  Final turnout pass (same pipeline, flagged as FINAL in time_slot).
+  19:00–02:00  Exit-poll aggregation (RSS + LLM), only after calendar embargo lift (29 Apr 2026 19:00 IST).
   02:00–07:00  Idle (long sleep).
 
 Env:
@@ -74,8 +74,11 @@ PHASE_STATES: list[tuple[date, list[str]]] = [
 
 TURNOUT_START = (7, 0)
 TURNOUT_FINAL = (18, 30)
-EXIT_POLL_START = (19, 15)
+EXIT_POLL_START = (19, 0)
 EXIT_POLL_END = (2, 0)  # night window ends 02:00
+
+# Mirror src/lib/utils/countdown.ts EXIT_POLL_EMBARGO_LIFT_IST
+EXIT_POLL_EMBARGO_LIFT = datetime(2026, 4, 29, 19, 0, tzinfo=IST)
 
 # Prefer these outlets when Google supports source: filters (often sparse — we always add a broad fallback).
 TRUSTED_BLOCK = (
@@ -107,6 +110,10 @@ def minutes_since_midnight(dt: datetime) -> int:
     return dt.hour * 60 + dt.minute
 
 
+def exit_poll_embargo_active(dt: datetime) -> bool:
+    return dt.astimezone(IST) < EXIT_POLL_EMBARGO_LIFT
+
+
 def run_mode(dt: datetime) -> str:
     """TURNOUT_LIVE | TURNOUT_FINAL | EXIT_POLL | IDLE"""
     d = dt.date()
@@ -118,9 +125,10 @@ def run_mode(dt: datetime) -> str:
     t_exit = EXIT_POLL_START[0] * 60 + EXIT_POLL_START[1]
     t_night_end = EXIT_POLL_END[0] * 60 + EXIT_POLL_END[1]
 
-    if t >= t_exit:
-        return "EXIT_POLL"
-    if t < t_night_end:
+    in_exit_window = (t >= t_exit) or (t < t_night_end)
+    if in_exit_window:
+        if exit_poll_embargo_active(dt):
+            return "IDLE"
         return "EXIT_POLL"
     if t < t7:
         return "IDLE"

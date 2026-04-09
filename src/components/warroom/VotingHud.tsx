@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronUp, ChevronDown, Activity, BarChart3, Clock, PieChart, CheckCircle2, ExternalLink, X, Info, RefreshCw } from "lucide-react";
 import { useLiveData } from "@/lib/context/LiveDataContext";
-import { ELECTION_DATES } from "@/lib/utils/countdown";
+import { ELECTION_DATES, isExitPollEmbargoActive } from "@/lib/utils/countdown";
 import { getWarRoomPhase, istMinutesSinceMidnight, sameISTCalendarDay } from "@/lib/utils/warRoomSchedule";
 import {
   articleHostnameLabel,
@@ -143,7 +143,8 @@ export default function VotingHud({
   const mins = istMinutesSinceMidnight(now);
   const isExitPollUnlocked =
     isVoting &&
-    (warPhase === "EXIT_POLL" || (!isPollCalendarDay && mins >= 19 * 60 + 15));
+    !isExitPollEmbargoActive(now) &&
+    (warPhase === "EXIT_POLL" || (!isPollCalendarDay && mins >= 19 * 60));
 
   const activeStates: string[] =
     now >= ELECTION_DATES.phase2b
@@ -157,9 +158,14 @@ export default function VotingHud({
     if (warPhase === "TURNOUT_LIVE") {
       phaseBanner = { tone: "blue", text: "Live turnout window (07:00–18:30 IST)." };
     } else if (warPhase === "TURNOUT_FINAL") {
-      phaseBanner = { tone: "amber", text: "Polls closed — final turnout pass (18:30–19:15 IST)." };
+      phaseBanner = { tone: "amber", text: "Polls closed — final turnout pass (18:30–19:00 IST)." };
+    } else if (warPhase === "EXIT_POLL_EMBARGO") {
+      phaseBanner = {
+        tone: "amber",
+        text: "Exit-poll embargo until 29 Apr 2026, 19:00 IST — tab and ingest stay dark until lift.",
+      };
     } else if (warPhase === "EXIT_POLL") {
-      phaseBanner = { tone: "orange", text: "Exit-poll window (19:15–02:00 IST)." };
+      phaseBanner = { tone: "orange", text: "Exit-poll window (19:00–02:00 IST)." };
     } else {
       phaseBanner = { tone: "zinc", text: "Quiet window (02:00–07:00 IST)." };
     }
@@ -704,7 +710,8 @@ export default function VotingHud({
                   <BarChart3 className="h-8 w-8 text-[var(--text-muted)] mb-2 opacity-50" />
                   <p className="font-mono text-sm font-bold text-[var(--text-secondary)]">EMBARGO ACTIVE</p>
                   <p className="font-mono text-[10px] text-[var(--text-muted)] mt-1 text-center max-w-sm px-4">
-                    Exit-poll tab unlocks from 19:15 IST on polling days.
+                    Exit-poll tab unlocks after 29 Apr 2026, 19:00 IST (end of ECI embargo). Later evenings use the
+                    19:00–02:00 IST broadcast window while voting mode is on.
                   </p>
                 </div>
               ) : (

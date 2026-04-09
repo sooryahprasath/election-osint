@@ -120,7 +120,7 @@ export default function LiveElectionTimeline({
               />
             </div>
           </div>
-          <div className="grid grid-cols-4 gap-1 sm:gap-1.5">
+          <div className="grid grid-cols-2 min-[420px]:grid-cols-3 sm:grid-cols-5 gap-1 sm:gap-1.5">
             {intraday.steps.map((s) => (
               <div
                 key={s.key}

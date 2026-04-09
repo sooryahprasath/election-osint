@@ -1,3 +1,5 @@
+import { isExitPollEmbargoActive } from "@/lib/utils/countdown";
+
 /**
  * IST war-room schedule (aligns with voting_day_ingestor.py).
  * Times are wall-clock Asia/Kolkata on polling days.
@@ -9,9 +11,9 @@ export const WAR_ROOM_IST = {
   /** Switch to “final” estimate pass after polls close */
   turnoutFinalHour: 18,
   turnoutFinalMinute: 30,
-  /** Exit-poll embargo lift (broadcast window) */
+  /** Exit-poll broadcast window opens (after polls + calendar embargo lift on 29 Apr) */
   exitPollHour: 19,
-  exitPollMinute: 15,
+  exitPollMinute: 0,
   /** Stop heavy exit-poll polling (script may idle until next day) */
   exitPollQuietHour: 2,
 } as const;
@@ -43,8 +45,14 @@ export function istMinutesSinceMidnight(d: Date): number {
   return h * 60 + min;
 }
 
-/** Polling-day windows: live turnout vs final vs exit-poll night */
-export type WarRoomPhase = "TURNOUT_LIVE" | "TURNOUT_FINAL" | "EXIT_POLL" | "QUIET" | "OFF_DAY";
+/** Polling-day windows: live turnout vs final vs exit-poll night (+ calendar embargo before 29 Apr 19:00 IST) */
+export type WarRoomPhase =
+  | "TURNOUT_LIVE"
+  | "TURNOUT_FINAL"
+  | "EXIT_POLL_EMBARGO"
+  | "EXIT_POLL"
+  | "QUIET"
+  | "OFF_DAY";
 
 export function getWarRoomPhase(now: Date, isPollingCalendarDay: boolean): WarRoomPhase {
   if (!isPollingCalendarDay) return "OFF_DAY";
@@ -54,7 +62,9 @@ export function getWarRoomPhase(now: Date, isPollingCalendarDay: boolean): WarRo
   const tExit = WAR_ROOM_IST.exitPollHour * 60 + WAR_ROOM_IST.exitPollMinute;
   const tQuietEnd = WAR_ROOM_IST.exitPollQuietHour * 60;
 
-  if (t >= tExit || t < tQuietEnd) return "EXIT_POLL";
+  if (t >= tExit || t < tQuietEnd) {
+    return isExitPollEmbargoActive(now) ? "EXIT_POLL_EMBARGO" : "EXIT_POLL";
+  }
   if (t < t7) return "QUIET";
   if (t < tFinal) return "TURNOUT_LIVE";
   return "TURNOUT_FINAL";
