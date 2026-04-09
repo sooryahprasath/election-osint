@@ -1,10 +1,11 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronUp, ChevronDown, Activity, BarChart3, Clock, PieChart, CheckCircle2, ExternalLink, X, Info, RefreshCw } from "lucide-react";
 import { useLiveData } from "@/lib/context/LiveDataContext";
 import { ELECTION_DATES } from "@/lib/utils/countdown";
 import { getWarRoomPhase, istMinutesSinceMidnight, sameISTCalendarDay } from "@/lib/utils/warRoomSchedule";
+import { safeNewsArticleHref } from "@/lib/utils/newsUrls";
 
 function latestTurnoutRow(rows: any[], state: string) {
   const list = rows.filter((t) => t.state === state);
@@ -14,6 +15,24 @@ function latestTurnoutRow(rows: any[], state: string) {
     const tb = Date.parse(b.updated_at || "") || 0;
     return tb - ta;
   })[0];
+}
+
+/** DB time_slot stores ingest wall-clock — misleading when read minutes later. Use only LIVE vs FINAL. */
+function turnoutPhaseShort(timeSlot: string): string {
+  const u = (timeSlot || "").toUpperCase();
+  if (u.includes("FINAL")) return "FINAL";
+  return "LIVE";
+}
+
+/** Relative age from server updated_at (always meaningful vs a stale "09:11 IST" snapshot). */
+function formatRelativeUpdated(updatedAt: unknown): string {
+  const ms = updatedAt ? Date.parse(String(updatedAt)) || 0 : 0;
+  if (!ms) return "";
+  const min = Math.max(0, Math.round((Date.now() - ms) / 60000));
+  if (min <= 1) return "just now";
+  if (min < 60) return `${min}m ago`;
+  const h = Math.floor(min / 60);
+  return `${h}h ago`;
 }
 
 export default function VotingHud({
@@ -32,6 +51,7 @@ export default function VotingHud({
   onChangeTab?: (t: "TURNOUT" | "EXIT_POLLS") => void;
 }) {
   const { operationMode, simulatedDate, turnoutData, exitPolls, refreshWarRoom } = useLiveData();
+  const [, setRelativeTick] = useState(0);
   const [isDesktopCollapsed, setIsDesktopCollapsed] = useState(false);
   const [uncontrolledTab, setUncontrolledTab] = useState<"TURNOUT" | "EXIT_POLLS">("TURNOUT");
   const [countingState, setCountingState] = useState<string>("West Bengal");
@@ -171,6 +191,12 @@ export default function VotingHud({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeStates.join("|")]);
 
+  // Re-render periodically so "updated Xm ago" stays honest without a full page refresh.
+  useEffect(() => {
+    const id = window.setInterval(() => setRelativeTick((n) => n + 1), 30000);
+    return () => window.clearInterval(id);
+  }, []);
+
   if (!shouldRender) return null;
 
   return (
@@ -298,15 +324,15 @@ export default function VotingHud({
                 const minT = stateData ? Number(stateData.turnout_min) : 0;
                 const maxT = stateData ? Number(stateData.turnout_max) : 0;
                 const avgT = minT > 0 || maxT > 0 ? (minT + maxT) / 2 : 0;
-                const updMs = stateData?.updated_at ? (Date.parse(String(stateData.updated_at)) || 0) : 0;
-                const updMin = updMs ? Math.max(0, Math.round((Date.now() - updMs) / 60000)) : null;
                 const timeSlot = String(stateData?.time_slot || "");
-                const status =
-                  avgT > 0
-                    ? `${timeSlot || "LIVE"} · ${updMin == null ? "upd —" : updMin <= 1 ? "upd now" : `upd ${updMin}m`}`
-                    : stateData
-                      ? `Awaiting estimate · ${timeSlot || "LIVE"}`
-                      : "Awaiting ingest · updates ~15m";
+                const phase = turnoutPhaseShort(timeSlot);
+                const rel = formatRelativeUpdated(stateData?.updated_at);
+                const syncBit = rel ? ` · updated ${rel}` : " · no sync time";
+                const status = avgT > 0
+                  ? `${phase}${syncBit}`
+                  : stateData
+                    ? `Awaiting estimate · ${phase}${syncBit}`
+                    : "Awaiting ingest · tap REFRESH or wait for worker";
 
                 return (
                   <div key={state} className="flex flex-col rounded-xl border border-[color:var(--border)] bg-[var(--surface-1)] p-3 shadow-sm">
@@ -430,13 +456,21 @@ export default function VotingHud({
                       <div key={st} className="rounded-lg border border-[color:var(--border)] bg-[var(--surface-2)] px-3 py-2">
                         <div className="flex items-center justify-between">
                           <span className="font-mono text-[9px] font-bold tracking-wider text-[var(--text-primary)]">{st.toUpperCase()}</span>
-                          <span className="font-mono text-[8px] text-[var(--text-muted)]">{row?.time_slot ? String(row.time_slot) : "AWAITING"}</span>
+                          <span className="font-mono text-[8px] text-[var(--text-muted)]" suppressHydrationWarning>
+                            {row?.updated_at
+                              ? `Updated ${formatRelativeUpdated(row.updated_at) || "—"}`
+                              : "AWAITING"}
+                          </span>
                         </div>
                         {bullets.length > 0 ? (
                           <div className="mt-2 grid gap-1.5">
                             {bullets.slice(0, 6).map((n: any, idx: number) => {
                               const isMeta = n.type === "methodology";
                               const isCit = n.type === "citation";
+                              const linkHref =
+                                typeof n.source === "string" && n.source.trim().startsWith("http")
+                                  ? safeNewsArticleHref(n.source, String(n.text || ""))
+                                  : "";
                               return (
                                 <div
                                   key={idx}
@@ -451,11 +485,12 @@ export default function VotingHud({
                                   </span>
                                   <span className="min-w-0">
                                     {n.text}
-                                    {n.source ? (
+                                    {linkHref ? (
                                       <a
-                                        href={n.source}
+                                        href={linkHref}
                                         target="_blank"
                                         rel="noopener noreferrer"
+                                        title="Open source"
                                         className="text-[#0284c7] ml-1 hover:underline inline-flex items-center align-middle"
                                       >
                                         <ExternalLink className="h-3 w-3" />
