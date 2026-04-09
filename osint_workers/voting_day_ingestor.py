@@ -2,10 +2,13 @@
 DHARMA-OSINT — Voting day / exit-poll autonomous ingestor (IST).
 
 Schedule (polling calendar days only — see PHASE_STATES):
-  07:00–18:30  Live turnout + booth news (news RSS + dual-pass LLM consensus).
+  07:00–18:30  Live turnout + booth news (default: Gemini + Google Search grounding).
   18:30–19:15  Final turnout pass (same pipeline, flagged as FINAL in time_slot).
-  19:15–02:00  Exit-poll aggregation from multiple outlets.
+  19:15–02:00  Exit-poll aggregation from multiple outlets (RSS + LLM).
   02:00–07:00  Idle (long sleep).
+
+Env:
+  TURNOUT_INGEST_MODE=grounded|rss   default grounded — RSS uses dual LLM + News RSS corpus.
 
 Run under systemd with Restart=always, or cron @reboot + loop.
 Test:  python voting_day_ingestor.py --once
@@ -671,11 +674,34 @@ def ingest_turnout_for_states(states: list[str], finalize: bool) -> None:
     slot = format_time_slot_ist(now, finalize=finalize)
     label = "FINAL TURNOUT PASS" if finalize else "LIVE TURNOUT"
     print(f"\n[+] {label} — {', '.join(states)} | slot={slot}")
-    shared = fetch_shared_turnout_headlines(states)
-    print(f"   [i] Shared turnout headline RSS chunks: {len(shared)} (voter turnout / 2026 / LIVE wires)")
+    ingest_mode = (os.getenv("TURNOUT_INGEST_MODE") or "grounded").strip().lower()
+
+    if ingest_mode == "rss":
+        shared = fetch_shared_turnout_headlines(states)
+        print(f"   [i] Turnout pipeline: RSS — shared headline chunks: {len(shared)}")
+        for state in states:
+            try:
+                data = dual_consensus_turnout(state, finalize=finalize, shared_chunks=shared)
+                if not data:
+                    continue
+                upsert_turnout_row(state, data, slot)
+                lo = data.get("turnout_min")
+                hi = data.get("turnout_max")
+                bn = len(data.get("booth_news") or [])
+                print(f"   -> [OK] {state}  {lo}%–{hi}%  (conf {data.get('confidence_0_1')})  booth_items={bn}")
+            except Exception as e:
+                print(f"   -> [ERR] {state}: {e}")
+        return
+
+    print("   [i] Turnout pipeline: grounded (Gemini + Google Search; optional CEO page hint)")
+    if not gemini_client:
+        print("   [!] GEMINI_API_KEY missing — cannot run grounded turnout")
+        return
+    from turnout_grounded import run_grounded_turnout_pipeline
+
     for state in states:
         try:
-            data = dual_consensus_turnout(state, finalize=finalize, shared_chunks=shared)
+            data = run_grounded_turnout_pipeline(gemini_client, state, finalize, now)
             if not data:
                 continue
             upsert_turnout_row(state, data, slot)
