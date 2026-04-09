@@ -342,34 +342,37 @@ def fetch_youtube_video(query):
 
 def analyze_and_insert(source_title, source_url, original_title, full_text, image_url, state_context, valid_c_ids):
     election_context = get_election_context()
+    # Token hygiene: keep input tight and deterministic.
+    full_text = (full_text or "").strip()[:1400]
+    original_title = (original_title or "").strip()[:220]
     
-    prompt = f"""
-    You are a strictly accurate Election OSINT engine. {election_context}
-    Analyze this news article: Title: {original_title} Body: {full_text}
-
-    Return pure JSON (No markdown):
-    {{
-        "state": "{state_context.replace('_', ' ')}",
-        "constituency_id": "Blank if unknown, else exact internal ID from context if inferable",
-        "election_relevance_0_1": 0.0 to 1.0 (how directly this item is about Indian elections; 0.0 if mostly unrelated, only a passing mention, or foreign politics dominates),
-        "relevance_reason": "short reason (<= 12 words) for relevance score",
-        "severity": 1 to 5 integer (4 or 5 for extreme physical violence or major fraud only),
-        "verified": true or false,
-        "bullets": ["Point 1", "Point 2", "Point 3", "Point 4"],
-        "latitude": null or decimal degrees if the text implies a specific town/venue in India,
-        "longitude": null or decimal degrees (must pair with latitude),
-        "geo_confidence": 0.0 to 1.0 how sure you are about lat/long (0 if omitted),
-        "video_relevant": true only if a TV news clip or official rally video likely exists that matches THIS exact story; false for generic opinion, pure text, or when unsure,
-        "video_confidence": 0.0 to 1.0 confidence that a matching video exists,
-        "video_query": "Short 3-6 word YouTube search ONLY if video_relevant is true; else empty string"
-    }}
-    Rules:
-    - Never guess lat/long from state alone.
-    - bullets MUST be 2 to 4 items, each <= 12 words. No extra commentary.
-    - If video_relevant is false, video_query must be "".
-    - If the story is primarily about non-Indian politics or unrelated topics (e.g., US elections/Trump) and only briefly mentions Indian elections, set election_relevance_0_1 <= 0.3.
-    """
+    prompt = (
+        "You are a strictly accurate Indian election OSINT extractor. "
+        + election_context
+        + "\nReturn ONLY valid JSON (no markdown, no prose).\n"
+        + f'Title: "{original_title}"\n'
+        + f'Body: "{full_text}"\n\n'
+        + "Schema:\n"
+        + "{"
+        + f'"state":"{state_context.replace("_"," ")}",'
+        + '"constituency_id":"",'
+        + '"election_relevance_0_1":0.0,'
+        + '"relevance_reason":"",'
+        + '"severity":1,'
+        + '"verified":false,'
+        + '"bullets":["p1","p2","p3","p4"],'
+        + '"latitude":null,'
+        + '"longitude":null,'
+        + '"geo_confidence":0.0,'
+        + '"video_relevant":false,'
+        + '"video_confidence":0.0,'
+        + '"video_query":""'
+        + "}\n\n"
+        + "Rules: bullets=2..4 items, each <=12 words. Never guess coordinates. If not election-related, set election_relevance_0_1<=0.3."
+    )
     try:
+        # Low-signal telemetry so we can spot prompt bloat quickly.
+        print(f"   [ai] in_chars={len(original_title)+len(full_text)} title_chars={len(original_title)} body_chars={len(full_text)}")
         response = gemini_client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
         text = response.text.strip()
         if text.startswith("```json"): text = text[7:-3].strip()

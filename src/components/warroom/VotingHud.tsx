@@ -208,10 +208,8 @@ export default function VotingHud({
   }, [lastSyncMs]);
 
   const [notesState, setNotesState] = useState<string>("ALL");
-  const [notesOpen, setNotesOpen] = useState<boolean>(() => {
-    if (typeof window === "undefined") return true;
-    return window.innerWidth >= 768;
-  });
+  // UX: start compact by default (desktop shows "Latest"; mobile stays compact too).
+  const [notesOpen, setNotesOpen] = useState<boolean>(() => false);
   useLayoutEffect(() => {
     // keep selection valid when activeStates changes (phase switches)
     if (notesState !== "ALL" && !activeStates.includes(notesState)) setNotesState("ALL");
@@ -324,14 +322,14 @@ export default function VotingHud({
                     phaseBanner.tone === "blue"
                       ? "border-sky-300 bg-sky-100 text-sky-950 dark:border-sky-500/25 dark:bg-sky-500/10 dark:text-sky-200"
                       : phaseBanner.tone === "amber"
-                        ? "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-200"
+                        ? "border-amber-300 bg-amber-100 text-amber-950 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-200"
                         : phaseBanner.tone === "orange"
-                          ? "border-orange-200 bg-orange-50 text-orange-900 dark:border-orange-500/25 dark:bg-orange-500/10 dark:text-orange-200"
+                          ? "border-orange-300 bg-orange-100 !text-neutral-950 dark:border-orange-700 dark:bg-orange-950/85 dark:!text-orange-50"
                           : "border-[color:var(--border)] bg-[var(--surface-2)] text-[var(--text-secondary)]"
                   }`}
                 >
-                  <Info className="mt-0.5 h-3 w-3 shrink-0 text-current opacity-70" />
-                  <span className="line-clamp-1 md:line-clamp-none">{phaseBanner.text}</span>
+                  <Info className="mt-0.5 h-3 w-3 shrink-0 text-current opacity-70" aria-hidden />
+                  <span className="line-clamp-1 min-w-0 md:line-clamp-none">{phaseBanner.text}</span>
                 </div>
               ) : null}
 
@@ -372,7 +370,12 @@ export default function VotingHud({
                 const rel = formatRelativeUpdated(stateData?.updated_at);
                 const booth = Array.isArray(stateData?.booth_news) ? stateData.booth_news : [];
                 const hasEciEncore = booth.some((n: any) => n && typeof n === "object" && String(n.type || "") === "eci_encore");
-                const isOfficial = hasEciEncore || (stateData && Number(stateData.confidence_0_1 || 0) >= 0.86);
+                const srcUrl = String((stateData as any)?.source_url || (stateData as any)?.sourceUrl || "");
+                const srcTag = String((stateData as any)?.source || (stateData as any)?.numbers_source || "");
+                const looksEci =
+                  /ecinet\.eci\.gov\.in|encore\.eci\.gov\.in/i.test(srcUrl) || /\beci\b/i.test(srcTag);
+                const isOfficial =
+                  hasEciEncore || looksEci || (stateData && Number(stateData.confidence_0_1 || 0) >= 0.86);
                 const turnoutLabel =
                   avgT > 0 ? (Math.abs(minT - maxT) < 0.005 ? `${minT}%` : `${minT}–${maxT}%`) : "";
 
@@ -388,8 +391,8 @@ export default function VotingHud({
                       <span
                         className={`shrink-0 rounded-full border px-2.5 py-1 font-mono text-[9px] font-semibold uppercase tracking-wide ${
                           isOfficial
-                            ? "border-emerald-200/80 bg-emerald-50 text-emerald-950 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-100"
-                            : "border-sky-200/80 bg-sky-50 text-sky-950 dark:border-sky-500/30 dark:bg-sky-500/15 dark:text-sky-100"
+                            ? "border-emerald-300 bg-emerald-100 text-emerald-950 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-100"
+                            : "border-sky-200/80 bg-sky-50 !text-neutral-950 dark:border-sky-700 dark:bg-sky-900 dark:!text-sky-100"
                         }`}
                       >
                         {isOfficial ? "ECI" : phase}
@@ -399,13 +402,25 @@ export default function VotingHud({
                     {avgT > 0 ? (
                       <>
                         <div className="flex items-baseline justify-between gap-2">
-                          <span className="text-[clamp(1.35rem,4vw,1.65rem)] font-bold leading-none tabular-nums text-[var(--text-primary)]">
-                            {turnoutLabel}
-                          </span>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-[clamp(1.35rem,4vw,1.65rem)] font-bold leading-none tabular-nums text-[var(--text-primary)]">
+                              {turnoutLabel}
+                            </span>
+                            <span
+                              className={`shrink-0 rounded-md border px-1.5 py-0.5 font-mono text-[9px] font-bold ${
+                                isOfficial
+                                  ? "border-emerald-300 bg-emerald-100 text-emerald-950 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-100"
+                                  : "border-zinc-300 bg-zinc-100 !text-neutral-950 dark:border-zinc-600 dark:bg-zinc-900 dark:!text-zinc-100"
+                              }`}
+                              title={isOfficial ? "Official ECI source" : "Not official ECI — web snapshot"}
+                            >
+                              {isOfficial ? "ECI" : "WEB"}
+                            </span>
+                          </div>
                           <span className="font-mono text-[10px] font-semibold text-[var(--text-secondary)]">TURNOUT</span>
                         </div>
                         <p className="mt-1.5 text-[11px] leading-snug text-[var(--text-secondary)]">
-                          Updated {rel || "—"} · {isOfficial ? "official · ECI ECINet" : "unofficial · wire snapshot"}
+                          Updated {rel || "—"} · {isOfficial ? "official · ECI" : "unofficial · web snapshot"}
                         </p>
                       </>
                     ) : (
@@ -698,7 +713,9 @@ export default function VotingHud({
                     <div key={poll.id} className="border border-[color:var(--border)] rounded-lg p-3 bg-[var(--surface-1)] shadow-sm">
                       <div className="flex justify-between items-center mb-3">
                         <span className="font-mono text-xs font-bold text-[var(--text-primary)]">{String(poll.state).toUpperCase()}</span>
-                        <span className="font-mono text-[9px] bg-orange-500/10 border border-orange-500/25 px-2 py-1 rounded text-orange-200">{poll.agency}</span>
+                        <span className="font-mono text-[9px] bg-orange-500/10 border border-orange-500/25 px-2 py-1 rounded text-orange-900 dark:text-orange-200">
+                          {poll.agency}
+                        </span>
                       </div>
                       <div className="flex flex-col gap-2">
                         <div>
