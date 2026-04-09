@@ -39,8 +39,8 @@ export default function CenterPane({
   setGlobalConstituencyId: (id: string | null) => void;
   flyToState: string | null;
   setFlyToState: (s: string | null) => void;
-  setActiveSignal: (s: any | null) => void;
-  setActiveClusterSignals: (s: any[] | null) => void;
+  setActiveSignal: (s: unknown | null) => void;
+  setActiveClusterSignals: (s: unknown[] | null) => void;
   mapOverlayMode: "VIDEOS" | "ALL";
   setMapOverlayMode: (m: "VIDEOS" | "ALL") => void;
   mapVerifiedOnly: boolean;

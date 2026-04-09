@@ -109,6 +109,13 @@ def extract_article_text(url: str, max_chars: int = 1800) -> str:
         return ""
 
 
+def entry_fallback_text(entry, max_chars: int = 1800) -> str:
+    summary = (getattr(entry, "summary", "") or "").strip()
+    title = (getattr(entry, "title", "") or "").strip()
+    text = summary if len(summary) >= 80 else f"{title}. {summary}".strip(". ").strip()
+    return text[:max_chars]
+
+
 def fetch_corpus(state: str, query_extra: str, limit: int = 8) -> list[str]:
     raw = f"{state} Assembly Election 2026 {query_extra} when:1d {TRUSTED_BLOCK}"
     safe = urllib.parse.quote(raw)
@@ -117,10 +124,13 @@ def fetch_corpus(state: str, query_extra: str, limit: int = 8) -> list[str]:
     try:
         feed = feedparser.parse(url)
         for entry in feed.entries[:limit]:
-            text = extract_article_text(getattr(entry, "link", "") or "")
+            link = getattr(entry, "link", "") or ""
+            text = extract_article_text(link) if link else ""
+            if not text:
+                text = entry_fallback_text(entry)
             src = getattr(getattr(entry, "source", None), "title", "") or "feed"
             if text:
-                chunks.append(f"Outlet: {src} | URL: {entry.link} | Text: {text}")
+                chunks.append(f"Outlet: {src} | URL: {link} | Text: {text}")
     except Exception as e:
         print(f"      [!] RSS error ({state}): {e}")
     return chunks
@@ -134,9 +144,12 @@ def fetch_eci_corpus(state: str, limit: int = 5) -> list[str]:
     try:
         feed = feedparser.parse(url)
         for entry in feed.entries[:limit]:
-            text = extract_article_text(getattr(entry, "link", "") or "")
+            link = getattr(entry, "link", "") or ""
+            text = extract_article_text(link) if link else ""
+            if not text:
+                text = entry_fallback_text(entry)
             if text:
-                chunks.append(f"[ECI-related] URL: {entry.link} | Text: {text}")
+                chunks.append(f"[ECI-related] URL: {link} | Text: {text}")
     except Exception:
         pass
     return chunks

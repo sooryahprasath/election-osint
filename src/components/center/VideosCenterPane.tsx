@@ -5,6 +5,7 @@ import { Play, ExternalLink, Search, CheckCircle2 } from "lucide-react";
 import { useLiveData } from "@/lib/context/LiveDataContext";
 import { relativeTime } from "@/lib/utils/formatting";
 import { excludeFromIntelligenceFeed } from "@/lib/utils/signalClassifier";
+import { usePullToRefresh } from "@/lib/hooks/usePullToRefresh";
 
 function getYouTubeThumbnail(videoUrl?: string) {
   if (!videoUrl) return "";
@@ -20,25 +21,34 @@ export default function VideosCenterPane({
   onSelectSignal,
 }: {
   globalStateFilter: string;
-  onSelectSignal: (s: any) => void;
+  onSelectSignal: (s: unknown) => void;
 }) {
-  const { signals } = useLiveData();
+  const { signals, refreshSignals } = useLiveData();
   const [q, setQ] = useState("");
   const [verifiedOnly, setVerifiedOnly] = useState(false);
+  const { ref: scrollRef, pullPx, state: pullState } = usePullToRefresh({
+    enabled: true,
+    onRefresh: refreshSignals,
+  });
 
   const videos = useMemo(() => {
-    const filtered = signals.filter((s: any) => {
+    const filtered = signals.filter((s: unknown) => {
+      const ss = s as Record<string, unknown>;
       if (excludeFromIntelligenceFeed(s)) return false;
-      if (!s.video_url) return false;
-      if (globalStateFilter !== "ALL" && s.state !== globalStateFilter) return false;
-      if (verifiedOnly && !s.verified) return false;
+      if (!ss.video_url) return false;
+      if (globalStateFilter !== "ALL" && ss.state !== globalStateFilter) return false;
+      if (verifiedOnly && !ss.verified) return false;
       if (q.trim()) {
-        const t = `${s.title || ""} ${s.body || ""} ${s.source || ""}`.toLowerCase();
+        const t = `${String(ss.title || "")} ${String(ss.body || "")} ${String(ss.source || "")}`.toLowerCase();
         if (!t.includes(q.trim().toLowerCase())) return false;
       }
       return true;
     }).slice();
-    filtered.sort((a: any, b: any) => (Date.parse(b.created_at || "") || 0) - (Date.parse(a.created_at || "") || 0));
+    filtered.sort((a: unknown, b: unknown) => {
+      const aa = a as Record<string, unknown>;
+      const bb = b as Record<string, unknown>;
+      return (Date.parse(String(bb.created_at || "")) || 0) - (Date.parse(String(aa.created_at || "")) || 0);
+    });
     return filtered.slice(0, 24);
   }, [signals, globalStateFilter, q, verifiedOnly]);
 
@@ -72,18 +82,36 @@ export default function VideosCenterPane({
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto pb-24 max-md:pb-28 md:pb-3 pt-2 pretty-scroll">
+      <div
+        ref={scrollRef}
+        className="flex-1 min-h-0 overflow-y-auto pb-24 max-md:pb-28 md:pb-3 pt-2 pretty-scroll overscroll-contain touch-pan-y"
+      >
+        {/* Pull-to-refresh chrome (mobile only) */}
+        <div
+          className="flex items-center justify-center"
+          style={{
+            height: pullPx ? pullPx : 0,
+            transition: pullState === "refreshing" ? "none" : "height 120ms ease",
+          }}
+        >
+          {pullPx ? (
+            <div className="rounded-md border border-[color:var(--border)] bg-[var(--surface-2)] px-2 py-1 font-mono text-[9px] font-bold text-[var(--text-secondary)]">
+              {pullState === "refreshing" ? "REFRESHING…" : pullState === "ready" ? "RELEASE TO REFRESH" : "PULL TO REFRESH"}
+            </div>
+          ) : null}
+        </div>
         {videos.length === 0 ? (
           <div className="p-6 text-center font-mono text-[10px] text-[var(--text-muted)]">
             No videos found for this scope yet.
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-2 p-3 md:grid-cols-2 xl:grid-cols-3">
-            {videos.map((s: any) => {
-              const thumb = getYouTubeThumbnail(s.video_url);
+            {videos.map((s: unknown) => {
+              const ss = s as Record<string, unknown>;
+              const thumb = getYouTubeThumbnail(String(ss.video_url || ""));
               return (
                 <article
-                  key={s.id}
+                  key={String(ss.id || "")}
                   onClick={() => onSelectSignal(s)}
                   className="overflow-hidden rounded-xl border border-[color:var(--border)] bg-[var(--surface-1)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer"
                 >
@@ -115,37 +143,46 @@ export default function VideosCenterPane({
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="font-mono text-[9px] font-bold text-[var(--text-muted)] shrink-0">
-                            {(s.state || "INDIA").toUpperCase()}
+                            {String(ss.state || "INDIA").toUpperCase()}
                           </span>
-                          <span className="min-w-0 truncate font-mono text-[9px] text-[var(--text-muted)]">{String(s.source || "VIDEO").toUpperCase()}</span>
+                          <span className="min-w-0 truncate font-mono text-[9px] text-[var(--text-muted)]">{String(ss.source || "VIDEO").toUpperCase()}</span>
                         </div>
                         <span className="font-mono text-[9px] text-[var(--text-muted)] shrink-0" suppressHydrationWarning>
-                          {relativeTime(new Date(s.created_at || s.createdAt))}
+                          {relativeTime(
+                            new Date(
+                              String(
+                                ss.created_at ||
+                                  (ss as Record<string, unknown>).createdAt ||
+                                  (ss as Record<string, unknown>).created_at ||
+                                  ""
+                              )
+                            )
+                          )}
                         </span>
                       </div>
 
                       <div className="mt-1 text-[12px] font-semibold leading-tight text-[var(--text-primary)] line-clamp-2">
-                        {s.title}
+                        {String(ss.title || "")}
                       </div>
 
-                      {s.body ? (
+                      {ss.body ? (
                         <div className="mt-1 text-[11px] leading-relaxed text-[var(--text-secondary)] line-clamp-2">
-                          {s.body}
+                          {String(ss.body)}
                         </div>
                       ) : null}
 
                       <div className="mt-2 flex items-center justify-between">
                         <div className="flex flex-wrap gap-1.5">
-                          <span className={`font-mono text-[8px] font-bold px-1.5 py-0.5 rounded border ${s.verified ? "text-[#16a34a] bg-[#16a34a]/10 border-[#16a34a]/25" : "text-[#ea580c] bg-[#ea580c]/10 border-[#ea580c]/25"}`}>
-                            {s.verified ? "VERIFIED" : "UNVERIFIED"}
+                          <span className={`font-mono text-[8px] font-bold px-1.5 py-0.5 rounded border ${ss.verified ? "text-[#16a34a] bg-[#16a34a]/10 border-[#16a34a]/25" : "text-[#ea580c] bg-[#ea580c]/10 border-[#ea580c]/25"}`}>
+                            {ss.verified ? "VERIFIED" : "UNVERIFIED"}
                           </span>
                           <span className="font-mono text-[8px] font-bold text-[var(--text-muted)] bg-[var(--surface-2)] border border-[color:var(--border)] px-1.5 py-0.5 rounded">
-                            SEV-{s.severity || 1}
+                            SEV-{Number(ss.severity || 1)}
                           </span>
                         </div>
 
                         <a
-                          href={s.video_url}
+                          href={String(ss.video_url || "")}
                           target="_blank"
                           rel="noopener noreferrer"
                           onClick={(e) => e.stopPropagation()}

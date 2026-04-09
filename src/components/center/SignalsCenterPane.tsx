@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import SignalCardBase from "@/components/signals/SignalCardBase";
 import { useLiveData } from "@/lib/context/LiveDataContext";
 import { STATE_META } from "@/lib/utils/states";
 import { excludeFromIntelligenceFeed } from "@/lib/utils/signalClassifier";
 import PhaseTimeline from "@/components/signals/PhaseTimeline";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, Search, X } from "lucide-react";
+import { usePullToRefresh } from "@/lib/hooks/usePullToRefresh";
 
 /**
  * Intelligence feed (OSINT `signals`) — moved from the left pane into Center.
@@ -20,34 +21,43 @@ export default function SignalsCenterPane({
   globalStateFilter: string;
   setGlobalStateFilter: (s: string) => void;
   globalConstituencyId: string | null;
-  onSelectSignal: (s: any) => void;
+  onSelectSignal: (s: unknown) => void;
 }) {
-  const [tick, setTick] = useState(0);
   const [timelineOpen, setTimelineOpen] = useState(false);
-  const { signals, constituencies } = useLiveData();
+  const [q, setQ] = useState("");
+  const { signals, constituencies, refreshSignals } = useLiveData();
 
-  useEffect(() => {
-    const t = setInterval(() => setTick((n) => n + 1), 60_000);
-    return () => clearInterval(t);
-  }, []);
+  const { ref: scrollRef, pullPx, state: pullState } = usePullToRefresh({
+    enabled: true,
+    onRefresh: refreshSignals,
+  });
 
-  const liveStates = Array.from(new Set(constituencies.map((c: any) => c.state))).filter(Boolean) as string[];
-  const activeConst = constituencies.find((c: any) => c.id === globalConstituencyId);
-  const effectiveState = activeConst ? activeConst.state : globalStateFilter;
+  const liveStates = Array.from(
+    new Set(constituencies.map((c: unknown) => String((c as Record<string, unknown>).state || "")))
+  ).filter(Boolean) as string[];
+  const activeConst = constituencies.find((c: unknown) => String((c as Record<string, unknown>).id || "") === String(globalConstituencyId || ""));
+  const effectiveState = activeConst ? String((activeConst as Record<string, unknown>).state || "ALL") : globalStateFilter;
 
   const filteredSignals = useMemo(() => {
-    const filtered = signals.filter((s: any) => {
+    const filtered = signals.filter((s: unknown) => {
+      const ss = s as Record<string, unknown>;
       if (excludeFromIntelligenceFeed(s)) return false;
-      if (effectiveState !== "ALL") return s.state === effectiveState;
+      if (effectiveState !== "ALL") return ss.state === effectiveState;
+      if (q.trim()) {
+        const t = `${String(ss.title || "")} ${String(ss.body || "")} ${String(ss.source || "")} ${String(ss.state || "")}`.toLowerCase();
+        if (!t.includes(q.trim().toLowerCase())) return false;
+      }
       return true;
     });
-    filtered.sort((a: any, b: any) => {
-      const at = Date.parse(a.created_at || "") || 0;
-      const bt = Date.parse(b.created_at || "") || 0;
+    filtered.sort((a: unknown, b: unknown) => {
+      const aa = a as Record<string, unknown>;
+      const bb = b as Record<string, unknown>;
+      const at = Date.parse(String(aa.created_at || "")) || 0;
+      const bt = Date.parse(String(bb.created_at || "")) || 0;
       return bt - at;
     });
     return filtered;
-  }, [signals, effectiveState]);
+  }, [signals, effectiveState, q]);
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-[var(--surface-1)]">
@@ -75,6 +85,27 @@ export default function SignalsCenterPane({
             <PhaseTimeline />
           </div>
         ) : null}
+        <div className="mt-2 flex items-center gap-2">
+          <div className="flex flex-1 items-center gap-1.5 rounded-md border border-[color:var(--border)] bg-[var(--surface-1)] px-2 py-1">
+            <Search className="h-3.5 w-3.5 text-[var(--text-muted)] shrink-0" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search signals…"
+              className="w-full bg-transparent font-mono text-[10px] text-[var(--text-primary)] placeholder-[color:var(--text-muted)] outline-none"
+            />
+            {q.trim() ? (
+              <button
+                type="button"
+                onClick={() => setQ("")}
+                className="rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
+                aria-label="Clear search"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
+          </div>
+        </div>
         <div className="mt-2 overflow-x-auto">
           <div className="inline-flex min-w-full gap-1 rounded-md border border-[color:var(--border)] bg-[var(--surface-2)] p-1">
             <button
@@ -111,12 +142,29 @@ export default function SignalsCenterPane({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto pb-24 max-md:pb-28 md:pb-3">
+      <div
+        ref={scrollRef}
+        className="min-h-0 flex-1 overflow-y-auto pb-24 max-md:pb-28 md:pb-3 overscroll-contain touch-pan-y"
+      >
+        {/* Pull-to-refresh chrome (mobile only) */}
+        <div
+          className="flex items-center justify-center"
+          style={{
+            height: pullPx ? pullPx : 0,
+            transition: pullState === "refreshing" ? "none" : "height 120ms ease",
+          }}
+        >
+          {pullPx ? (
+            <div className="rounded-md border border-[color:var(--border)] bg-[var(--surface-2)] px-2 py-1 font-mono text-[9px] font-bold text-[var(--text-secondary)]">
+              {pullState === "refreshing" ? "REFRESHING…" : pullState === "ready" ? "RELEASE TO REFRESH" : "PULL TO REFRESH"}
+            </div>
+          ) : null}
+        </div>
         {filteredSignals.length > 0 ? (
           <div className="p-3 grid gap-2">
-            {filteredSignals.map((signal: any) => (
+            {filteredSignals.map((signal: unknown) => (
               <SignalCardBase
-                key={signal.id}
+                key={String((signal as Record<string, unknown>).id || "")}
                 signal={signal}
                 onClick={() => onSelectSignal(signal)}
                 tone="soft"

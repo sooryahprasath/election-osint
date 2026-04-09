@@ -165,14 +165,21 @@ export async function POST(req: Request) {
     if (bodyText.length > MAX_INGEST_BODY_BYTES) {
       return NextResponse.json({ success: false, error: "Payload too large" }, { status: 413 });
     }
-    const data =
+    const data: Record<string, unknown> =
       typeof bodyText === "string" && bodyText.startsWith("{")
         ? JSON.parse(bodyText)
         : { title: "", summary: bodyText, source: "Unknown" };
 
-    let { source, title, body, source_url } = data;
+    const source = data.source;
+    const title = data.title;
+    const source_url = data.source_url;
+    let body = data.body;
 
     if (!body && data.summary) body = data.summary;
+    const sourceStr = typeof source === "string" ? source : String(source || "");
+    const titleStr = typeof title === "string" ? title : String(title || "");
+    const bodyStr = typeof body === "string" ? body : String(body || "");
+    const sourceUrlStr = typeof source_url === "string" ? source_url : null;
 
     if (!genAI) {
       return NextResponse.json({ success: false, error: "AI Engine Offline Server-side" }, { status: 500 });
@@ -183,15 +190,17 @@ export async function POST(req: Request) {
     const prompt = `
     You are a strictly accurate high-intelligence Election OSINT engine.
     Analyze this election news item:
-    Source: ${source}
-    Title: ${title}
-    Body: ${body}
+    Source: ${sourceStr}
+    Title: ${titleStr}
+    Body: ${bodyStr}
 
     Your goal is to extract strictly factual data and return it as a pure JSON object without markdown formatting. Do not wrap in \`\`\`json.
 
     Fields:
     1. "state": Indian state (e.g. "Kerala", "West Bengal", "Assam", "Tamil Nadu", "Puducherry"). If national, "".
     2. "constituency_id": Internal ID (e.g. "KER-001") if clearly implied; else "".
+    2b. "election_relevance_0_1": 0.0 to 1.0 indicating how directly this item is about Indian elections. If the item is mostly unrelated or foreign politics dominates (e.g. US politics/Trump) and elections are only mentioned in passing, set <= 0.3.
+    2c. "relevance_reason": short reason (<= 12 words) for the relevance score.
     3. "severity": integer 1–5 (1 calm, 5 extreme violence/fraud).
     4. "verified": true for official / top-tier outlets; false for rumors.
     5. "latitude", "longitude": decimals only if a specific town/venue is implied; else null. Do not guess from state alone.
@@ -201,7 +210,7 @@ export async function POST(req: Request) {
     9. "video_query": short search string only if video_relevant; else "".
 
     JSON only:
-    { "state": "", "constituency_id": "", "severity": 2, "verified": false, "latitude": null, "longitude": null, "geo_confidence": 0, "video_relevant": false, "video_confidence": 0, "video_query": "" }
+    { "state": "", "constituency_id": "", "election_relevance_0_1": 1, "relevance_reason": "", "severity": 2, "verified": false, "latitude": null, "longitude": null, "geo_confidence": 0, "video_relevant": false, "video_confidence": 0, "video_query": "" }
     `;
 
     const result = await model.generateContent(prompt);
@@ -212,13 +221,26 @@ export async function POST(req: Request) {
         text = text.substring(7, text.length - 3).trim();
       }
       analysis = JSON.parse(text);
-    } catch (e) {
+    } catch {
       console.error("Failed to parse Gemini output:", result.response.text());
       throw new Error("AI produced invalid JSON");
     }
 
     const geoC = Number(analysis.geo_confidence) || 0;
     const coords = validIndiaCoords(analysis.latitude, analysis.longitude, geoC);
+
+    const relevance = Number((analysis as Record<string, unknown>).election_relevance_0_1 ?? 1);
+    if (!Number.isFinite(relevance) || relevance < 0.6) {
+      return NextResponse.json({
+        success: true,
+        dropped: true,
+        reason: "low_relevance",
+        relevance: Number.isFinite(relevance) ? relevance : null,
+        relevance_reason: (analysis as Record<string, unknown>).relevance_reason ?? null,
+        processed: analysis,
+        saved: null,
+      });
+    }
 
     const db = getServiceSupabase();
     if (!db) {
@@ -258,7 +280,8 @@ export async function POST(req: Request) {
         .order("created_at", { ascending: false })
         .limit(200);
       for (const r of recent || []) {
-        const h = simhash32(`${(r as any).title || ""} ${(r as any).body || ""}`);
+        const rr = r as Record<string, unknown>;
+        const h = simhash32(`${String(rr.title || "")} ${String(rr.body || "")}`);
         // 32-bit hash is coarser: keep a tight threshold.
         if (h !== 0 && hamming32(incomingHash, h) <= 2) {
           return NextResponse.json({ success: true, deduped: true, reason: "soft_simhash", processed: analysis, saved: null });
@@ -267,10 +290,10 @@ export async function POST(req: Request) {
     }
 
     const insertRow: Record<string, unknown> = {
-      source,
-      source_url: canonUrl || null,
-      title,
-      body,
+      source: sourceStr,
+      source_url: canonUrl || (sourceUrlStr || null),
+      title: titleStr,
+      body: bodyStr,
       state: (analysis.state as string) || null,
       constituency_id: (analysis.constituency_id as string) || null,
       severity: Number(analysis.severity) || 1,

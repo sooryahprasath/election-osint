@@ -18,7 +18,7 @@ const IndiaFlagIcon = ({ className }: { className?: string }) => (
 
 type TopBarProps = {
   /** Opens the signal detail modal when user taps a ticker headline (desktop + mobile). */
-  onSelectTickerSignal?: (signal: any) => void;
+  onSelectTickerSignal?: (signal: unknown) => void;
 };
 
 export default function TopBar({ onSelectTickerSignal }: TopBarProps) {
@@ -35,7 +35,7 @@ export default function TopBar({ onSelectTickerSignal }: TopBarProps) {
         ? window.matchMedia("(prefers-color-scheme: dark)").matches
         : false;
     const nextDark = stored ? stored === "dark" : prefersDark;
-    setIsDark(nextDark);
+    queueMicrotask(() => setIsDark(nextDark));
     if (typeof document !== "undefined") {
       document.documentElement.classList.toggle("dark", nextDark);
     }
@@ -61,15 +61,16 @@ export default function TopBar({ onSelectTickerSignal }: TopBarProps) {
   // ⚙️ Ticker State & Logic (Pause-and-Restart)
   // ==========================================
   const [isScrolling, setIsScrolling] = useState(true);
-  const [displayedSignals, setDisplayedSignals] = useState<any[]>([]);
-  const latestSignalsRef = useRef<any[]>([]);
+  const [displayedSignals, setDisplayedSignals] = useState<unknown[]>([]);
+  const latestSignalsRef = useRef<unknown[]>([]);
 
   // 1. Filter the live data for SEV-4+ OR Official
-  const intelSignals = signals.filter((s: any) => !excludeFromIntelligenceFeed(s));
+  const intelSignals = signals.filter((s: unknown) => !excludeFromIntelligenceFeed(s));
 
-  const targetNews = intelSignals.filter((s: any) => {
-    const isSevere = s.severity >= 4;
-    const isOfficial = s.category?.toLowerCase() === "official";
+  const targetNews = intelSignals.filter((s: unknown) => {
+    const ss = s as Record<string, unknown>;
+    const isSevere = Number(ss.severity || 0) >= 4;
+    const isOfficial = String(ss.category || "").toLowerCase() === "official";
     return isSevere || isOfficial;
   }).slice(0, 15);
 
@@ -80,7 +81,7 @@ export default function TopBar({ onSelectTickerSignal }: TopBarProps) {
     latestSignalsRef.current = freshSignals;
     // Auto-start the very first load
     if (displayedSignals.length === 0 && freshSignals.length > 0) {
-      setDisplayedSignals(freshSignals);
+      queueMicrotask(() => setDisplayedSignals(freshSignals));
     }
   }, [freshSignals, displayedSignals.length]);
 
@@ -99,7 +100,7 @@ export default function TopBar({ onSelectTickerSignal }: TopBarProps) {
   // ==========================================
 
   useEffect(() => {
-    setMounted(true);
+    queueMicrotask(() => setMounted(true));
     const interval = setInterval(() => {
       setCountdown(getNextElectionEvent());
       setCurrentTime(new Date());
@@ -157,27 +158,38 @@ export default function TopBar({ onSelectTickerSignal }: TopBarProps) {
               onAnimationEnd={handleScrollComplete}
             >
               <div className="flex shrink-0 pr-8">
-                {displayedSignals.map((h: any, i: number) => (
-                  <button
-                    key={`news-${h.id || i}`}
-                    type="button"
-                    className="inline-flex items-center mr-8 cursor-pointer rounded-sm border-0 bg-transparent p-0 text-left font-mono hover:bg-[var(--surface-2)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0284c7] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--surface-1)]"
-                    onClick={() => onSelectTickerSignal?.(h)}
-                  >
-                    {h.severity >= 4 ? (
-                      <AlertTriangle className="h-3 w-3 text-[#dc2626] mr-1 shrink-0" />
-                    ) : h.category?.toLowerCase() === 'official' ? (
-                      <CheckCircle className="h-3 w-3 text-[#16a34a] mr-1 shrink-0" />
-                    ) : (
-                      <Activity className="h-3 w-3 text-[#52525b] mr-1 shrink-0" />
-                    )}
+                {displayedSignals.map((h: unknown, i: number) => {
+                  const hh = h as Record<string, unknown>;
+                  return (
+                    <button
+                      key={`news-${String(hh.id || i)}`}
+                      type="button"
+                      className="inline-flex items-center mr-8 cursor-pointer rounded-sm border-0 bg-transparent p-0 text-left font-mono hover:bg-[var(--surface-2)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0284c7] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--surface-1)]"
+                      onClick={() => onSelectTickerSignal?.(h)}
+                    >
+                      {Number(hh.severity || 0) >= 4 ? (
+                        <AlertTriangle className="h-3 w-3 text-[#dc2626] mr-1 shrink-0" />
+                      ) : String(hh.category || "").toLowerCase() === "official" ? (
+                        <CheckCircle className="h-3 w-3 text-[#16a34a] mr-1 shrink-0" />
+                      ) : (
+                        <Activity className="h-3 w-3 text-[#52525b] mr-1 shrink-0" />
+                      )}
 
-                    <span className={`mr-2 font-semibold ${h.severity >= 4 ? "text-[#dc2626]" : h.category?.toLowerCase() === 'official' ? "text-[#16a34a]" : "text-[#52525b]"}`}>
-                      [{h.state ? h.state.toUpperCase() : "INDIA"}]
-                    </span>
-                    <span className="text-[var(--text-primary)]">{h.title}</span>
-                  </button>
-                ))}
+                      <span
+                        className={`mr-2 font-semibold ${
+                          Number(hh.severity || 0) >= 4
+                            ? "text-[#dc2626]"
+                            : String(hh.category || "").toLowerCase() === "official"
+                              ? "text-[#16a34a]"
+                              : "text-[#52525b]"
+                        }`}
+                      >
+                        [{hh.state ? String(hh.state).toUpperCase() : "INDIA"}]
+                      </span>
+                      <span className="text-[var(--text-primary)]">{String(hh.title || "")}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChevronUp, ChevronDown, Activity, BarChart3, Clock, PieChart, CheckCircle2, ExternalLink, X, Info } from "lucide-react";
+import { ChevronUp, ChevronDown, Activity, BarChart3, Clock, PieChart, CheckCircle2, ExternalLink, X, Info, RefreshCw } from "lucide-react";
 import { useLiveData } from "@/lib/context/LiveDataContext";
 import { ELECTION_DATES } from "@/lib/utils/countdown";
 import { getWarRoomPhase, istMinutesSinceMidnight, sameISTCalendarDay } from "@/lib/utils/warRoomSchedule";
@@ -31,10 +31,11 @@ export default function VotingHud({
   activeTab?: "TURNOUT" | "EXIT_POLLS";
   onChangeTab?: (t: "TURNOUT" | "EXIT_POLLS") => void;
 }) {
-  const { operationMode, simulatedDate, turnoutData, exitPolls } = useLiveData();
+  const { operationMode, simulatedDate, turnoutData, exitPolls, refreshWarRoom } = useLiveData();
   const [isDesktopCollapsed, setIsDesktopCollapsed] = useState(false);
   const [uncontrolledTab, setUncontrolledTab] = useState<"TURNOUT" | "EXIT_POLLS">("TURNOUT");
   const [countingState, setCountingState] = useState<string>("West Bengal");
+  const [refreshing, setRefreshing] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const activeTab = controlledActiveTab ?? uncontrolledTab;
   const setActiveTab = (t: "TURNOUT" | "EXIT_POLLS") => {
@@ -106,13 +107,13 @@ export default function VotingHud({
   let phaseBanner: { tone: "blue" | "amber" | "orange" | "zinc"; text: string } | null = null;
   if (isVoting && isPollCalendarDay) {
     if (warPhase === "TURNOUT_LIVE") {
-      phaseBanner = { tone: "blue", text: "Live turnout window (07:00–18:30 IST) — ranges from news + LLM consensus; not official ECI." };
+      phaseBanner = { tone: "blue", text: "Live turnout window (07:00–18:30 IST)." };
     } else if (warPhase === "TURNOUT_FINAL") {
-      phaseBanner = { tone: "amber", text: "Polls closed — final estimate pass (18:30–19:15 IST). Embargo until exit-poll window." };
+      phaseBanner = { tone: "amber", text: "Polls closed — final turnout pass (18:30–19:15 IST)." };
     } else if (warPhase === "EXIT_POLL") {
-      phaseBanner = { tone: "orange", text: "Exit-poll window (19:15–02:00 IST). Multiple agencies; figures are indicative until counts." };
+      phaseBanner = { tone: "orange", text: "Exit-poll window (19:15–02:00 IST)." };
     } else {
-      phaseBanner = { tone: "zinc", text: "Quiet window (02:00–07:00 IST). Ingestor resting." };
+      phaseBanner = { tone: "zinc", text: "Quiet window (02:00–07:00 IST)." };
     }
   }
 
@@ -135,7 +136,34 @@ export default function VotingHud({
     return m;
   }, [turnoutData, activeStates]);
 
+  const lastSyncMs = useMemo(() => {
+    let best = 0;
+    for (const r of turnoutData as any[]) {
+      const t = Date.parse(String(r?.updated_at || r?.created_at || "")) || 0;
+      if (t > best) best = t;
+    }
+    for (const r of exitPolls as any[]) {
+      const t = Date.parse(String(r?.updated_at || r?.created_at || "")) || 0;
+      if (t > best) best = t;
+    }
+    return best;
+  }, [turnoutData, exitPolls]);
+
+  const syncLabel = useMemo(() => {
+    if (!lastSyncMs) return "No sync yet";
+    const diff = Date.now() - lastSyncMs;
+    const m = Math.max(0, Math.round(diff / 60000));
+    if (m <= 1) return "Last sync: just now";
+    if (m < 60) return `Last sync: ${m}m ago`;
+    const h = Math.round(m / 60);
+    return `Last sync: ${h}h ago`;
+  }, [lastSyncMs]);
+
   const [notesState, setNotesState] = useState<string>("ALL");
+  const [notesOpen, setNotesOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    return window.innerWidth >= 768;
+  });
   useLayoutEffect(() => {
     // keep selection valid when activeStates changes (phase switches)
     if (notesState !== "ALL" && !activeStates.includes(notesState)) setNotesState("ALL");
@@ -217,97 +245,103 @@ export default function VotingHud({
 
       {(variant === "embedded" || !isDesktopCollapsed) && (
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3 pb-6 md:p-4 md:pb-4">
-          {isVoting && phaseBanner && activeTab === "TURNOUT" && (
-            <div
-              className={`mb-3 flex gap-2 rounded-md border px-2.5 py-1.5 font-mono text-[8px] leading-relaxed md:text-[9px] ${
-                phaseBanner.tone === "blue"
-                  ? "border-sky-500/25 bg-sky-500/10 text-sky-200"
-                  : phaseBanner.tone === "amber"
-                    ? "border-amber-500/25 bg-amber-500/10 text-amber-200"
-                    : phaseBanner.tone === "orange"
-                      ? "border-orange-500/25 bg-orange-500/10 text-orange-200"
-                      : "border-[color:var(--border)] bg-[var(--surface-2)] text-[var(--text-secondary)]"
-              }`}
-            >
-              <Info className="mt-0.5 h-3 w-3 shrink-0 text-current opacity-70" />
-              <span>{phaseBanner.text}</span>
+          {/* Sticky: phase + status + refresh (mobile-first) */}
+          {isVoting && activeTab === "TURNOUT" ? (
+            <div className="sticky top-0 z-10 -mx-3 mb-3 border-b border-[color:var(--border)] bg-[var(--surface-1)]/95 px-3 pb-2 pt-2 backdrop-blur-md md:static md:mx-0 md:border-b-0 md:bg-transparent md:px-0 md:pb-0 md:pt-0">
+              {phaseBanner ? (
+                <div
+                  className={`mb-2 flex gap-2 rounded-md border px-2.5 py-1.5 font-mono text-[8px] leading-snug md:text-[9px] ${
+                    phaseBanner.tone === "blue"
+                      ? "border-sky-200 bg-sky-50 text-sky-900 dark:border-sky-500/25 dark:bg-sky-500/10 dark:text-sky-200"
+                      : phaseBanner.tone === "amber"
+                        ? "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-200"
+                        : phaseBanner.tone === "orange"
+                          ? "border-orange-200 bg-orange-50 text-orange-900 dark:border-orange-500/25 dark:bg-orange-500/10 dark:text-orange-200"
+                          : "border-[color:var(--border)] bg-[var(--surface-2)] text-[var(--text-secondary)]"
+                  }`}
+                >
+                  <Info className="mt-0.5 h-3 w-3 shrink-0 text-current opacity-70" />
+                  <span className="line-clamp-1 md:line-clamp-none">{phaseBanner.text}</span>
+                </div>
+              ) : null}
+
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0 font-mono text-[9px] font-bold text-[var(--text-secondary)]">
+                  Live turnout · <span className="font-mono text-[9px] font-bold text-[var(--text-muted)]">{syncLabel}</span> · unofficial
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (refreshing) return;
+                    try {
+                      setRefreshing(true);
+                      await refreshWarRoom();
+                    } finally {
+                      setRefreshing(false);
+                    }
+                  }}
+                  className="shrink-0 inline-flex items-center gap-1.5 rounded-md border border-[color:var(--border)] bg-[var(--surface-1)] px-2 py-1 font-mono text-[9px] font-bold text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+                  aria-label="Refresh voting data"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
+                  REFRESH
+                </button>
+              </div>
             </div>
-          )}
+          ) : null}
 
           {isVoting && activeTab === "TURNOUT" && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
               {activeStates.map((state) => {
                 const stateData = latestTurnoutRow(turnoutData, state);
                 const minT = stateData ? Number(stateData.turnout_min) : 0;
                 const maxT = stateData ? Number(stateData.turnout_max) : 0;
                 const avgT = minT > 0 || maxT > 0 ? (minT + maxT) / 2 : 0;
-                const newsBullets = stateData?.booth_news || [];
-                const updated = stateData?.updated_at
-                  ? new Date(stateData.updated_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", month: "short", day: "numeric" })
-                  : null;
+                const updMs = stateData?.updated_at ? (Date.parse(String(stateData.updated_at)) || 0) : 0;
+                const updMin = updMs ? Math.max(0, Math.round((Date.now() - updMs) / 60000)) : null;
+                const timeSlot = String(stateData?.time_slot || "");
+                const status =
+                  avgT > 0
+                    ? `${timeSlot || "LIVE"} · ${updMin == null ? "upd —" : updMin <= 1 ? "upd now" : `upd ${updMin}m`}`
+                    : stateData
+                      ? `Awaiting estimate · ${timeSlot || "LIVE"}`
+                      : "Awaiting ingest · updates ~15m";
 
                 return (
                   <div key={state} className="flex flex-col rounded-xl border border-[color:var(--border)] bg-[var(--surface-1)] p-3 shadow-sm">
-                    <div className="mb-2 flex items-start justify-between gap-2">
+                    <div className="mb-1.5 flex items-start justify-between gap-2">
                       <span className="font-mono text-[10px] font-bold tracking-wide text-[var(--text-primary)]">{state.toUpperCase()}</span>
-                      <div className="text-right">
-                        <span className="font-mono text-[9px] text-[#0284c7] font-bold bg-[#0284c7]/10 px-2 py-0.5 rounded block">
-                          {stateData?.time_slot || "AWAITING SYNC"}
-                        </span>
-                        {updated && <span className="font-mono text-[8px] text-[var(--text-muted)] mt-0.5 block">upd {updated}</span>}
-                      </div>
-                    </div>
-
-                    <div className="flex items-end gap-2 mb-2">
-                      <span className="text-3xl font-bold text-[var(--text-primary)] leading-none tabular-nums">
-                        {avgT > 0 ? `${minT}–${maxT}%` : "—"}
+                      <span className="shrink-0 rounded-md border border-sky-200 bg-sky-50 px-2 py-0.5 font-mono text-[9px] font-bold text-sky-900 dark:border-[#0284c7]/20 dark:bg-[#0284c7]/8 dark:text-sky-200">
+                        {status}
                       </span>
-                      <span className="font-mono text-[9px] text-[var(--text-muted)] mb-1">RANGE</span>
                     </div>
 
-                    <div className="w-full bg-[var(--surface-3)] h-2 rounded-full overflow-hidden mb-3">
-                      <div
-                        className="h-full bg-gradient-to-r from-[#0284c7] to-[#0369a1] transition-all duration-1000 rounded-full"
-                        style={{ width: `${Math.min(100, Math.max(0, avgT))}%` }}
-                      />
-                    </div>
+                    {avgT > 0 ? (
+                      <div className="flex items-end gap-2 mb-1.5">
+                        <span className="text-[28px] font-bold text-[var(--text-primary)] leading-none tabular-nums">
+                          {`${minT}–${maxT}%`}
+                        </span>
+                        <span className="font-mono text-[9px] text-[var(--text-muted)] mb-1">TURNOUT</span>
+                      </div>
+                    ) : (
+                      <div className="mb-1.5">
+                        <div className="text-[14px] font-semibold text-[var(--text-primary)]">Awaiting estimate</div>
+                        <div className="mt-0.5 font-mono text-[9px] text-[var(--text-muted)]">
+                          No numeric turnout detected yet.
+                        </div>
+                      </div>
+                    )}
 
-                    <div className="mt-auto pt-2 border-t border-[color:var(--border)] flex flex-col gap-1.5">
-                      <span className="font-mono text-[8px] font-bold text-[var(--text-muted)] tracking-wider">FIELD NOTES & SOURCES</span>
-                      {newsBullets.length > 0 ? (
-                        newsBullets.map((n: any, idx: number) => {
-                          const isMeta = n.type === "methodology";
-                          const isCit = n.type === "citation";
-                          return (
-                            <div
-                              key={idx}
-                              className={`text-[10px] leading-tight flex items-start gap-1.5 rounded px-1.5 py-1 ${
-                                isMeta ? "bg-[var(--surface-2)] text-[var(--text-secondary)] italic" : "text-[var(--text-primary)]"
-                              }`}
-                            >
-                              <span className={`mt-0.5 shrink-0 ${isCit ? "text-[#0284c7]" : "text-[#ea580c]"}`}>
-                                {isCit ? "↗" : "▸"}
-                              </span>
-                              <span className="min-w-0">
-                                {n.text}
-                                {n.source ? (
-                                  <a
-                                    href={n.source}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-[#0284c7] ml-1 hover:underline inline-flex items-center align-middle"
-                                  >
-                                    <ExternalLink className="h-2.5 w-2.5" />
-                                  </a>
-                                ) : null}
-                              </span>
-                            </div>
-                          );
-                        })
-                      ) : (
-                        <div className="text-[10px] text-[var(--text-muted)] italic">Awaiting first ingest cycle…</div>
-                      )}
-                    </div>
+                    {avgT > 0 ? (
+                      <div className="w-full bg-[var(--surface-3)] h-2 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-[#0284c7] to-[#0369a1] transition-all duration-700 rounded-full"
+                          style={{ width: `${Math.min(100, Math.max(0, avgT))}%` }}
+                        />
+                      </div>
+                    ) : (
+                      <div className="w-full bg-[var(--surface-3)] h-2 rounded-full overflow-hidden opacity-60" />
+                    )}
                   </div>
                 );
               })}
@@ -317,13 +351,23 @@ export default function VotingHud({
           {isVoting && activeTab === "TURNOUT" && (
             <div className="mt-4 rounded-xl border border-[color:var(--border)] bg-[var(--surface-1)] p-3 md:p-4">
               <div className="flex items-center justify-between gap-2">
-                <div className="font-mono text-[10px] font-bold tracking-wider text-[var(--text-secondary)]">FIELD NOTES & SOURCES</div>
+                <button
+                  type="button"
+                  onClick={() => setNotesOpen((v) => !v)}
+                  className="inline-flex items-center gap-2 rounded-md border border-[color:var(--border)] bg-[var(--surface-1)] px-2 py-1 font-mono text-[10px] font-bold tracking-wider text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+                  aria-expanded={notesOpen}
+                >
+                  {notesOpen ? <ChevronUp className="h-3.5 w-3.5 text-[var(--text-muted)]" /> : <ChevronDown className="h-3.5 w-3.5 text-[var(--text-muted)]" />}
+                  NOTES & SOURCES
+                </button>
                 <div className="flex gap-1 overflow-x-auto">
                   <button
                     type="button"
                     onClick={() => setNotesState("ALL")}
-                    className={`shrink-0 rounded-md px-2 py-1 font-mono text-[9px] font-bold border ${
-                      notesState === "ALL" ? "border-sky-500/25 bg-sky-500/10 text-sky-200" : "border-[color:var(--border)] bg-[var(--surface-1)] text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
+                    className={`shrink-0 rounded-md px-2.5 py-1.5 font-mono text-[9px] font-bold border ${
+                      notesState === "ALL"
+                        ? "border-sky-200 bg-sky-50 text-sky-900 dark:border-sky-500/25 dark:bg-sky-500/10 dark:text-sky-200"
+                        : "border-[color:var(--border)] bg-[var(--surface-1)] text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
                     }`}
                   >
                     ALL
@@ -333,7 +377,7 @@ export default function VotingHud({
                       key={st}
                       type="button"
                       onClick={() => setNotesState(st)}
-                      className={`shrink-0 rounded-md px-2 py-1 font-mono text-[9px] font-bold border ${
+                      className={`shrink-0 rounded-md px-2.5 py-1.5 font-mono text-[9px] font-bold border ${
                         notesState === st ? "border-emerald-500/25 bg-emerald-500/10 text-[#16a34a]" : "border-[color:var(--border)] bg-[var(--surface-1)] text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
                       }`}
                     >
@@ -343,57 +387,92 @@ export default function VotingHud({
                 </div>
               </div>
 
-              <div className="mt-3 grid gap-2">
-                {(notesState === "ALL" ? activeStates : [notesState]).map((st) => {
-                  const row = latestTurnoutByState.get(st);
-                  const bullets = row?.booth_news || [];
-                  return (
-                    <div key={st} className="rounded-lg border border-[color:var(--border)] bg-[var(--surface-2)] px-3 py-2">
-                      <div className="flex items-center justify-between">
-                        <span className="font-mono text-[9px] font-bold tracking-wider text-[var(--text-primary)]">{st.toUpperCase()}</span>
-                        <span className="font-mono text-[8px] text-[var(--text-muted)]">{row?.time_slot ? String(row.time_slot) : "AWAITING"}</span>
-                      </div>
-                      {bullets.length > 0 ? (
-                        <div className="mt-2 grid gap-1.5">
-                          {bullets.slice(0, 6).map((n: any, idx: number) => {
-                            const isMeta = n.type === "methodology";
-                            const isCit = n.type === "citation";
-                            return (
-                              <div
-                                key={idx}
-                                className={`text-[11px] leading-snug flex items-start gap-2 rounded px-2 py-1 border ${
-                                  isMeta
-                                    ? "bg-[var(--surface-1)] text-[var(--text-secondary)] italic border-[color:var(--border)]"
-                                    : "bg-[var(--surface-1)] text-[var(--text-primary)] border-[color:var(--border)]"
-                                }`}
-                              >
-                                <span className={`mt-0.5 shrink-0 ${isCit ? "text-[#0284c7]" : "text-[#ea580c]"}`}>
-                                  {isCit ? "↗" : "▸"}
-                                </span>
-                                <span className="min-w-0">
-                                  {n.text}
-                                  {n.source ? (
-                                    <a
-                                      href={n.source}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-[#0284c7] ml-1 hover:underline inline-flex items-center align-middle"
-                                    >
-                                      <ExternalLink className="h-3 w-3" />
-                                    </a>
-                                  ) : null}
-                                </span>
-                              </div>
-                            );
-                          })}
-                        </div>
+              {!notesOpen ? (
+                <div className="mt-3 rounded-lg border border-[color:var(--border)] bg-[var(--surface-2)] px-3 py-2">
+                  <div className="font-mono text-[9px] font-bold text-[var(--text-muted)]">TOP NOTES</div>
+                  <div className="mt-2 grid gap-1.5">
+                    {(() => {
+                      const states = notesState === "ALL" ? activeStates : [notesState];
+                      const flat: { st: string; n: any }[] = [];
+                      for (const st of states) {
+                        const row = latestTurnoutByState.get(st);
+                        const bullets = row?.booth_news || [];
+                        for (const n of bullets) flat.push({ st, n });
+                      }
+                      const pick = flat.slice(0, 2);
+                      return pick.length > 0 ? (
+                        pick.map((x, idx) => (
+                          <div key={idx} className="flex items-start gap-2 rounded border border-[color:var(--border)] bg-[var(--surface-1)] px-2 py-1">
+                            <span className="mt-0.5 shrink-0 font-mono text-[8px] font-bold text-[var(--text-secondary)]">{x.st.toUpperCase()}</span>
+                            <span className="min-w-0 text-[11px] text-[var(--text-primary)]">{x.n?.text}</span>
+                          </div>
+                        ))
                       ) : (
-                        <div className="mt-2 text-[11px] text-[var(--text-muted)] italic">Awaiting first ingest cycle…</div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+                        <div className="text-[11px] text-[var(--text-muted)] italic">No notes yet.</div>
+                      );
+                    })()}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setNotesOpen(true)}
+                    className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-[color:var(--border)] bg-[var(--surface-1)] px-2 py-1 font-mono text-[9px] font-bold text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+                  >
+                    <ChevronDown className="h-3.5 w-3.5 text-[var(--text-muted)]" /> SHOW ALL
+                  </button>
+                </div>
+              ) : (
+                <div className="mt-3 grid gap-2">
+                  {(notesState === "ALL" ? activeStates : [notesState]).map((st) => {
+                    const row = latestTurnoutByState.get(st);
+                    const bullets = row?.booth_news || [];
+                    return (
+                      <div key={st} className="rounded-lg border border-[color:var(--border)] bg-[var(--surface-2)] px-3 py-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-mono text-[9px] font-bold tracking-wider text-[var(--text-primary)]">{st.toUpperCase()}</span>
+                          <span className="font-mono text-[8px] text-[var(--text-muted)]">{row?.time_slot ? String(row.time_slot) : "AWAITING"}</span>
+                        </div>
+                        {bullets.length > 0 ? (
+                          <div className="mt-2 grid gap-1.5">
+                            {bullets.slice(0, 6).map((n: any, idx: number) => {
+                              const isMeta = n.type === "methodology";
+                              const isCit = n.type === "citation";
+                              return (
+                                <div
+                                  key={idx}
+                                  className={`text-[11px] leading-snug flex items-start gap-2 rounded px-2 py-1 border ${
+                                    isMeta
+                                      ? "bg-[var(--surface-1)] text-[var(--text-secondary)] italic border-[color:var(--border)]"
+                                      : "bg-[var(--surface-1)] text-[var(--text-primary)] border-[color:var(--border)]"
+                                  }`}
+                                >
+                                  <span className={`mt-0.5 shrink-0 ${isCit ? "text-[#0284c7]" : "text-[#ea580c]"}`}>
+                                    {isCit ? "↗" : "▸"}
+                                  </span>
+                                  <span className="min-w-0">
+                                    {n.text}
+                                    {n.source ? (
+                                      <a
+                                        href={n.source}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-[#0284c7] ml-1 hover:underline inline-flex items-center align-middle"
+                                      >
+                                        <ExternalLink className="h-3 w-3" />
+                                      </a>
+                                    ) : null}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="mt-2 text-[11px] text-[var(--text-muted)] italic">Awaiting first ingest cycle…</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 

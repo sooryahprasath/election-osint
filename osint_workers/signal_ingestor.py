@@ -351,6 +351,8 @@ def analyze_and_insert(source_title, source_url, original_title, full_text, imag
     {{
         "state": "{state_context.replace('_', ' ')}",
         "constituency_id": "Blank if unknown, else exact internal ID from context if inferable",
+        "election_relevance_0_1": 0.0 to 1.0 (how directly this item is about Indian elections; 0.0 if mostly unrelated, only a passing mention, or foreign politics dominates),
+        "relevance_reason": "short reason (<= 12 words) for relevance score",
         "severity": 1 to 5 integer (4 or 5 for extreme physical violence or major fraud only),
         "verified": true or false,
         "bullets": ["Point 1", "Point 2", "Point 3", "Point 4"],
@@ -365,12 +367,24 @@ def analyze_and_insert(source_title, source_url, original_title, full_text, imag
     - Never guess lat/long from state alone.
     - bullets MUST be 2 to 4 items, each <= 12 words. No extra commentary.
     - If video_relevant is false, video_query must be "".
+    - If the story is primarily about non-Indian politics or unrelated topics (e.g., US elections/Trump) and only briefly mentions Indian elections, set election_relevance_0_1 <= 0.3.
     """
     try:
         response = gemini_client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
         text = response.text.strip()
         if text.startswith("```json"): text = text[7:-3].strip()
         analysis = json.loads(text)
+
+        # Hard relevance gate: skip items that are not directly about the election.
+        rel = 0.0
+        try:
+            rel = float(analysis.get("election_relevance_0_1") or 0.0)
+        except Exception:
+            rel = 0.0
+        if rel < 0.6:
+            rsn = str(analysis.get("relevance_reason") or "low relevance").strip()
+            print(f"   ->[DROP] Low election relevance ({rel:.2f}): {rsn[:64]}")
+            return False
         
         bullets = analysis.get("bullets", []) if isinstance(analysis, dict) else []
         if not isinstance(bullets, list):

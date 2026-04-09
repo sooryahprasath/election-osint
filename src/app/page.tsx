@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Sparkles, Database, LayoutPanelTop, MoreHorizontal, Activity, BarChart3, ChevronDown, Layers, Globe2, MapPinned, Clapperboard } from "lucide-react";
+import { Sparkles, Database, LayoutPanelTop, Activity, BarChart3, ChevronDown, Layers, Globe2, MapPinned, Clapperboard } from "lucide-react";
 import TopBar from "@/components/TopBar";
 import BottomBar from "@/components/BottomBar";
 import SignalPane from "@/components/signals/SignalPane";
@@ -17,18 +17,20 @@ const TOPBAR_H = 36;
 const SIDEBAR_W = 280;
 
 export default function Home() {
+  type Signal = Record<string, unknown>;
   const { operationMode } = useLiveData();
   const [flyToState, setFlyToState] = useState<string | null>(null);
   const [globalStateFilter, setGlobalStateFilter] = useState<string>("ALL");
   const [globalConstituencyId, setGlobalConstituencyId] = useState<string | null>(null);
-  const [activeSignal, setActiveSignal] = useState<any | null>(null);
-  const [activeClusterSignals, setActiveClusterSignals] = useState<any[] | null>(null);
+  const [activeSignal, setActiveSignal] = useState<Signal | null>(null);
+  const [activeClusterSignals, setActiveClusterSignals] = useState<Signal[] | null>(null);
   const [mobileTab, setMobileTab] = useState<"briefing" | "center" | "intel">("center");
   const [centerMode, setCenterMode] = useState<CenterMode>("signals");
   const [moreOpen, setMoreOpen] = useState(false);
   const [liveTab, setLiveTab] = useState<"TURNOUT" | "EXIT_POLLS">("TURNOUT");
   const [mapActionsOpen, setMapActionsOpen] = useState(false);
-  const [intelBackToMap, setIntelBackToMap] = useState(false);
+  // Tracks whether the Intel pane was opened from the map chrome on mobile.
+  const [, setIntelBackToMap] = useState(false);
   const mapActionsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -64,8 +66,10 @@ export default function Home() {
   // When voting/counting starts, bias toward the Live monitor in Center (mobile-first).
   useEffect(() => {
     if (operationMode === "PRE-POLL") return;
-    setMobileTab("center");
-    setCenterMode("live");
+    queueMicrotask(() => {
+      setMobileTab("center");
+      setCenterMode("live");
+    });
   }, [operationMode]);
 
   const showMapResetButton = centerMode === "map" && (isMdUp || mobileTab === "center");
@@ -127,7 +131,7 @@ export default function Home() {
 
   return (
     <>
-      <TopBar onSelectTickerSignal={setActiveSignal} />
+      <TopBar onSelectTickerSignal={(s) => setActiveSignal(s as Signal)} />
 
       {/* Center Pane Shell (desktop: between sidebars; mobile: full content under Center tab) */}
       <main
@@ -145,7 +149,12 @@ export default function Home() {
           {centerMode === "map" ? (
             <div className="pointer-events-none absolute right-2 top-2 z-[60]">
               <div className="pointer-events-auto">
-                <CenterModeSwitcher value={centerMode} onChange={setCenterMode} showLive={operationMode !== "PRE-POLL"} />
+                <CenterModeSwitcher
+                  value={centerMode}
+                  onChange={setCenterMode}
+                  showLive={operationMode !== "PRE-POLL"}
+                  liveLabel={operationMode === "VOTING_DAY" ? "VOTING LIVE" : operationMode === "COUNTING_DAY" ? "COUNTING LIVE" : "LIVE"}
+                />
               </div>
             </div>
           ) : (
@@ -157,7 +166,12 @@ export default function Home() {
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <CenterModeSwitcher value={centerMode} onChange={setCenterMode} showLive={operationMode !== "PRE-POLL"} />
+                <CenterModeSwitcher
+                  value={centerMode}
+                  onChange={setCenterMode}
+                  showLive={operationMode !== "PRE-POLL"}
+                  liveLabel={operationMode === "VOTING_DAY" ? "VOTING LIVE" : operationMode === "COUNTING_DAY" ? "COUNTING LIVE" : "LIVE"}
+                />
                 {/* Hidden for now (per UX feedback). */}
               </div>
             </div>
@@ -199,8 +213,8 @@ export default function Home() {
               setGlobalConstituencyId={setGlobalConstituencyId}
               flyToState={flyToState}
               setFlyToState={setFlyToState}
-              setActiveSignal={setActiveSignal}
-              setActiveClusterSignals={setActiveClusterSignals}
+              setActiveSignal={(s) => setActiveSignal(s == null ? null : (s as Signal))}
+              setActiveClusterSignals={(s) => setActiveClusterSignals(s == null ? null : (s as Signal[]))}
               mapOverlayMode={mapOverlayMode}
               setMapOverlayMode={setMapOverlayMode}
               mapVerifiedOnly={mapVerifiedOnly}
@@ -220,8 +234,8 @@ export default function Home() {
           globalConstituencyId={globalConstituencyId}
           centerMode={centerMode}
           onChangeGlobalStateFilter={handleStateFilter}
-          onSelectSignal={(s: any) => {
-            setActiveSignal(s);
+          onSelectSignal={(s: unknown) => {
+            setActiveSignal(s as Signal);
             const nextMode = centerModeForSignal(s);
             setCenterMode(nextMode);
             if (typeof window !== "undefined" && window.innerWidth < 768) setMobileTab("center");
@@ -376,7 +390,7 @@ export default function Home() {
           onClose={() => setActiveClusterSignals(null)}
           onPick={(s) => {
             setActiveClusterSignals(null);
-            setActiveSignal(s);
+            setActiveSignal(s as Signal);
           }}
         />
       )}

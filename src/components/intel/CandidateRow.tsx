@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, GraduationCap, IndianRupee, User } from "lucide-react";
+import { AlertTriangle, IndianRupee, User } from "lucide-react";
 import { formatIndianCurrency, normalizeEducation } from "@/lib/utils/formatting";
 
 // Fallback logic to get colors without the old static mock dictionary
@@ -10,84 +10,91 @@ const getPartyColor = (party: string) => {
 };
 
 interface CandidateRowProps {
-  candidate: any;
+  candidate: unknown;
   onClick?: () => void;
   isLeading?: boolean;
 }
 
 export default function CandidateRow({ candidate, onClick, isLeading }: CandidateRowProps) {
-  const partyColor = getPartyColor(candidate.party || "IND");
-  const partyLabel = String(candidate.party || "IND");
+  const c = candidate as Record<string, unknown>;
+  const partyColor = getPartyColor(String(c.party || "IND"));
+  const partyLabel = String(c.party || "IND");
+  const photoUrl = String(c.photo_url || "").trim();
+  const name = String(c.name || "");
+  const age = Number(c.age || 0);
+  const assets = Number(c.assets_value || 0);
+  const crim = Number(c.criminal_cases || 0);
 
   return (
     <div 
       onClick={onClick}
       className={`px-3 py-2.5 border-b border-[color:var(--border)] transition-colors ${onClick ? 'cursor-pointer hover:bg-[var(--surface-2)]' : 'hover:bg-[var(--surface-2)]'}`}
     >
-      {/* Consistent row layout (mobile + desktop) */}
-      <div className="mb-1.5 flex flex-col gap-1">
-        <div className="flex min-w-0 flex-1 items-center gap-2 md:w-full md:flex-none">
-          <div className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: partyColor }} />
-          <span className="min-w-0 flex-1 truncate font-mono text-[11px] font-medium text-[var(--text-primary)]">
-            {candidate.name}
-          </span>
-          <span className="shrink-0 rounded border border-[color:var(--border)] bg-[var(--surface-2)] px-1.5 py-0.5 font-mono text-[8px] font-bold text-[var(--text-secondary)] md:hidden">
-            VOL
-          </span>
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5 pl-[14px]">
-          <span
-            title={partyLabel}
-            className="max-w-full rounded border border-[color:var(--border)] bg-[var(--surface-2)] px-1.5 py-0.5 font-mono text-[9px] font-bold leading-tight text-[var(--text-primary)]"
-            style={{ borderLeftWidth: 3, borderLeftColor: partyColor }}
-          >
-            <span className="block max-w-[235px] truncate md:max-w-[220px]">{partyLabel}</span>
-          </span>
-          {candidate.removed && (
-            <span className="shrink-0 rounded border border-[color:var(--border)] bg-[var(--surface-2)] px-1 py-0.5 font-mono text-[8px] font-bold text-[var(--text-muted)]">
-              REMOVED
-            </span>
-          )}
-          {isLeading && (
-            <span className="shrink-0 rounded bg-[#22c55e]/10 px-1 py-0.5 font-mono text-[8px] text-[#22c55e]">
-              LEADING
-            </span>
+      <div className="flex items-start gap-2.5">
+        <div className="relative mt-0.5 h-8 w-8 shrink-0 overflow-hidden rounded-md border border-[color:var(--border)] bg-[var(--surface-2)]">
+          {photoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={photoUrl} alt="" className="h-full w-full object-cover" />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center">
+              <User className="h-4 w-4 text-[var(--text-muted)] opacity-70" />
+            </div>
           )}
         </div>
-      </div>
 
-      {/* Stats row */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[9px]">
-        {/* Age + Gender */}
-        <span className="flex items-center gap-1 text-[var(--text-secondary)]">
-          <User className="h-2.5 w-2.5" />
-          {candidate.age || 45}y
-        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="truncate font-mono text-[11px] font-semibold text-[var(--text-primary)]">
+                {name}
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                <span
+                  title={partyLabel}
+                  className="max-w-full rounded border border-[color:var(--border)] bg-[var(--surface-2)] px-1.5 py-0.5 font-mono text-[9px] font-bold leading-tight text-[var(--text-primary)]"
+                  style={{ borderLeftWidth: 3, borderLeftColor: partyColor }}
+                >
+                  <span className="block max-w-[235px] truncate md:max-w-[220px]">{partyLabel}</span>
+                </span>
 
-        {/* Wealth */}
-        <span className="flex items-center gap-1 text-[#ea580c]">
-          <IndianRupee className="h-2.5 w-2.5" />
-          {formatIndianCurrency(candidate.assets_value || 0)}
-        </span>
+                {crim > 0 ? (
+                  <span className="inline-flex items-center gap-1 rounded border border-[#dc2626]/25 bg-[#dc2626]/10 px-1.5 py-0.5 font-mono text-[9px] font-bold text-[#b91c1c]">
+                    <AlertTriangle className="h-3 w-3" /> CRIM: {crim}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 rounded border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[9px] font-bold text-[#16a34a]">
+                    <AlertTriangle className="h-3 w-3" /> CLEAN
+                  </span>
+                )}
 
-        {/* Criminal Records */}
-        {(candidate.criminal_cases || 0) > 0 ? (
-          <span className="flex items-center gap-1 text-[#dc2626]">
-            <AlertTriangle className="h-2.5 w-2.5" />
-            {candidate.criminal_cases} case{(candidate.criminal_cases || 0) > 1 ? "s" : ""}
-          </span>
-        ) : (
-          <span className="flex items-center gap-1 text-[#16a34a]">
-            <AlertTriangle className="h-2.5 w-2.5" />
-            Clean
-          </span>
-        )}
+                <span className="inline-flex items-center gap-1 rounded border border-[#ea580c]/25 bg-[#ea580c]/10 px-1.5 py-0.5 font-mono text-[9px] font-bold text-[#c2410c]">
+                  <IndianRupee className="h-3 w-3" /> {formatIndianCurrency(assets)}
+                </span>
 
-        {/* Education */}
-        <span className="flex items-center gap-1 text-[var(--text-muted)]">
-          <GraduationCap className="h-2.5 w-2.5" />
-          {normalizeEducation(candidate.education)}
-        </span>
+                {Boolean(c.removed) && (
+                  <span className="shrink-0 rounded border border-[color:var(--border)] bg-[var(--surface-2)] px-1 py-0.5 font-mono text-[8px] font-bold text-[var(--text-muted)]">
+                    REMOVED
+                  </span>
+                )}
+                {isLeading && (
+                  <span className="shrink-0 rounded bg-[#22c55e]/10 px-1 py-0.5 font-mono text-[8px] text-[#22c55e]">
+                    LEADING
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {age ? (
+              <div className="shrink-0 rounded border border-[color:var(--border)] bg-[var(--surface-2)] px-1.5 py-0.5 font-mono text-[9px] font-bold text-[var(--text-secondary)]">
+                {age}y
+              </div>
+            ) : null}
+          </div>
+
+          <div className="mt-1 font-mono text-[9px] text-[var(--text-muted)]">
+            {normalizeEducation(c.education)}
+          </div>
+        </div>
       </div>
     </div>
   );
