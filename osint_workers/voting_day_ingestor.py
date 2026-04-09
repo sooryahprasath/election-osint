@@ -698,6 +698,7 @@ def ingest_turnout_for_states(
     *,
     bust_eci_cache: bool = False,
 ) -> None:
+    states = [s.strip() for s in states if isinstance(s, str) and s.strip()]
     now = ist_now()
     slot = format_time_slot_ist(now, finalize=finalize)
     label = "FINAL TURNOUT PASS" if finalize else "LIVE TURNOUT"
@@ -745,6 +746,18 @@ def ingest_turnout_for_states(
         except Exception as e:
             print(f"   [!] ECI batch scrape failed: {e}")
             eci_map = {}
+        try:
+            keys = list(eci_map.keys()) if isinstance(eci_map, dict) else []
+            print(f"   [i] ECI snapshot states: {keys}")
+            for st in states:
+                snap = eci_map.get(st) if isinstance(eci_map, dict) else None
+                pct = snap.get("latest_pct") if isinstance(snap, dict) else None
+                if pct:
+                    print(f"      [i] ECI {st}: latest_pct={pct}")
+                else:
+                    print(f"      [!] ECI {st}: missing snapshot/latest_pct")
+        except Exception:
+            pass
 
         for state in states:
             try:
