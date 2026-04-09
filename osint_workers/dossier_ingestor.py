@@ -1,5 +1,4 @@
 import argparse
-import csv
 import os
 import re
 import time
@@ -58,25 +57,20 @@ if _DOSSIER_LLM and os.getenv("GEMINI_API_KEY"):
 # ----------------------------
 ECI_BASE_URL = "https://affidavit.eci.gov.in"
 ELECTION_HASH = "32-AC-GENERAL-3-60"
-MANUAL_CANDIDATE_SEED_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)),
-    "candidate_fallback_seed.csv",
-)
 
+# ECI uses numeric codes; TN/WB currently pending per your note (leave commented until live)
 ECI_STATE_CONFIG = [
     {"name": "Kerala", "code": "S11", "prefix": "KER", "max_pages": 89},
     {"name": "Assam", "code": "S03", "prefix": "ASM", "max_pages": 73},
     {"name": "Puducherry", "code": "U07", "prefix": "PY", "max_pages": 30},
-    {"name": "Tamil Nadu", "code": "S22", "prefix": "TN", "max_pages": 240},
-    {"name": "West Bengal", "code": "S25", "prefix": "WB", "max_pages": 220},
+    # {"name": "Tamil Nadu", "code": "S??", "prefix": "TN", "max_pages": ???},
+    # {"name": "West Bengal", "code": "S??", "prefix": "WB", "max_pages": ???},
 ]
 
 MYNETA_CONFIG = [
     {"name": "Kerala", "prefix": "KER", "base": "https://myneta.info/Kerala2026/", "pages": 9},
     {"name": "Assam", "prefix": "ASM", "base": "https://myneta.info/Assam2026/", "pages": 8},
     {"name": "Puducherry", "prefix": "PY", "base": "https://myneta.info/Puducherry2026/", "pages": 3},
-    {"name": "Tamil Nadu", "prefix": "TN", "base": "https://myneta.info/TamilNadu2026/", "pages": 24},
-    {"name": "West Bengal", "prefix": "WB", "base": "https://myneta.info/WestBengal2026/", "pages": 30},
 ]
 
 
@@ -359,19 +353,6 @@ def clean_currency_to_int(s: str) -> int:
     return v
 
 
-def _parse_bool(value: str | None) -> bool | None:
-    if value is None:
-        return None
-    s = str(value).strip().lower()
-    if not s:
-        return None
-    if s in {"1", "true", "yes", "y"}:
-        return True
-    if s in {"0", "false", "no", "n"}:
-        return False
-    return None
-
-
 # ----------------------------
 # ECI SCRAPER (Playwright)
 # ----------------------------
@@ -600,40 +581,6 @@ def _pick_myneta_summary_candidate_table(soup: BeautifulSoup) -> Tag | None:
     return best_table
 
 
-def _detect_myneta_unavailable_reason(html: str) -> str | None:
-    text = " ".join(BeautifulSoup(html or "", "html.parser").get_text(" ", strip=True).split()).lower()
-    if not text:
-        return "empty response"
-    if "unknown database" in text:
-        return "MyNeta state database is not live yet"
-    if "unable to connect to mysql" in text:
-        return "MyNeta backend database is unavailable"
-    if "access denied" in text:
-        return "access denied by upstream"
-    if "404" in text and "not found" in text:
-        return "summary page not found"
-    return None
-
-
-def probe_myneta_summary_availability(pw_page, base: str) -> tuple[bool, str | None]:
-    """
-    Check whether a MyNeta state summary page is usable before we attempt a full scrape.
-    """
-    url = f"{base}index.php?action=summary&subAction=candidates_analyzed&sort=candidate&page=1"
-    pw_page.goto(url, wait_until="domcontentloaded", timeout=60000)
-    try:
-        pw_page.wait_for_selector('a[href*="candidate_id="]', timeout=10000)
-        return True, None
-    except Exception:
-        html = pw_page.content()
-        reason = _detect_myneta_unavailable_reason(html)
-        if reason:
-            return False, reason
-        if "candidate_id=" in html:
-            return True, None
-        return False, "candidate summary table not available"
-
-
 def fetch_myneta_summary_rows(pw_page, base: str, page: int) -> list[dict]:
     """
     Load MyNeta summary in a real browser — the candidate table is JS-rendered; raw HTTP has no rows.
@@ -667,11 +614,8 @@ def fetch_myneta_summary_rows(pw_page, base: str, page: int) -> list[dict]:
 
         cand_name = tds[1].get_text(" ", strip=True)
         const_name = tds[2].get_text(" ", strip=True)
-        party = tds[3].get_text(" ", strip=True) if len(tds) > 3 else ""
         criminal_raw = tds[4].get_text(" ", strip=True) if len(tds) > 4 else "0"
         edu_raw = tds[5].get_text(" ", strip=True) if len(tds) > 5 else ""
-        assets_raw = tds[6].get_text(" ", strip=True) if len(tds) > 6 else ""
-        liabilities_raw = tds[7].get_text(" ", strip=True) if len(tds) > 7 else ""
 
         candidate_url = href_raw if href_raw.startswith("http") else f"{base}{href_raw.lstrip('/')}"
         m = re.search(r"candidate_id=(\d+)", candidate_url)
@@ -685,258 +629,13 @@ def fetch_myneta_summary_rows(pw_page, base: str, page: int) -> list[dict]:
         rows.append({
             "candidate_name": cand_name,
             "constituency_name": const_name,
-            "party": party,
             "myneta_candidate_id": cand_id,
             "myneta_url": candidate_url,
             "criminal_cases": criminal_cases,
             "education": edu_raw,
-            "assets_value": clean_currency_to_int(assets_raw),
-            "liabilities_value": clean_currency_to_int(liabilities_raw),
         })
 
     return rows
-
-
-def bootstrap_candidates_from_myneta(
-    db_constituencies: list[dict],
-    *,
-    headless: bool = True,
-    prefixes: set[str] | None = None,
-) -> dict[str, set[str]]:
-    """
-    Create baseline candidate rows directly from MyNeta summary pages.
-    This keeps the candidates table usable when the ECI affidavit endpoint is blocked.
-    """
-    seen_by_prefix: dict[str, set[str]] = {}
-    if not supabase:
-        return seen_by_prefix
-
-    print("\n[+] MyNeta: bootstrapping base candidates from summary pages...", flush=True)
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless)
-        ctx = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 900},
-        )
-        pw_page = ctx.new_page()
-
-        for cfg in MYNETA_CONFIG:
-            state_name = cfg["name"]
-            prefix = cfg["prefix"]
-            if prefixes is not None and prefix not in prefixes:
-                continue
-            base = cfg["base"]
-            pages = cfg["pages"]
-            seen_by_prefix.setdefault(prefix, set())
-
-            state_db_consts = [c for c in db_constituencies if (c.get("id") or "").startswith(prefix)]
-            const_name_to_id = {c["name"]: c["id"] for c in state_db_consts if c.get("id") and c.get("name")}
-            if not const_name_to_id:
-                print(f"    [!] No constituencies found for prefix {prefix}; skipping MyNeta bootstrap.", flush=True)
-                continue
-
-            print(f"\n======================================", flush=True)
-            print(f" MYNETA BOOTSTRAP: {state_name.upper()} (pages {pages})", flush=True)
-            print(f"======================================", flush=True)
-
-            available, reason = probe_myneta_summary_availability(pw_page, base)
-            if not available:
-                print(f"    [SKIP] {state_name}: {reason}.", flush=True)
-                continue
-
-            batch: list[dict] = []
-            processed_ledger = set()
-
-            for page_num in range(1, pages + 1):
-                print(f" -> Summary page {page_num}/{pages}", flush=True)
-                try:
-                    rows = fetch_myneta_summary_rows(pw_page, base, page_num)
-                except Exception as e:
-                    print(f"    [!] Failed summary page {page_num}: {e}", flush=True)
-                    continue
-
-                if not rows:
-                    print(f"    [!] 0 rows parsed on page {page_num} — check MyNeta layout or network", flush=True)
-                    continue
-
-                for row in rows:
-                    matched_const_name = best_constituency_name_match(
-                        row.get("constituency_name", ""),
-                        list(const_name_to_id.keys()),
-                    )
-                    if not matched_const_name:
-                        print(
-                            f"    [?] UNMAPPED MyNeta constituency for {row.get('candidate_name', 'Unknown')}: "
-                            f"'{row.get('constituency_name', '')}'",
-                            flush=True,
-                        )
-                        continue
-
-                    constituency_id = const_name_to_id.get(matched_const_name)
-                    cand_name = (row.get("candidate_name") or "").strip()
-                    if not constituency_id or not cand_name:
-                        continue
-
-                    ledger_key = f"{constituency_id}_{clean_full_name(cand_name)}"
-                    if ledger_key in processed_ledger:
-                        continue
-                    processed_ledger.add(ledger_key)
-
-                    cand_id = f"cand-{constituency_id}-{cand_name.replace(' ', '').lower()[:8]}"
-                    seen_by_prefix[prefix].add(cand_id)
-
-                    payload = {
-                        "id": cand_id,
-                        "constituency_id": constituency_id,
-                        "name": cand_name.title(),
-                        "party": row.get("party") or "",
-                        "source_url": row.get("myneta_url") or "",
-                        "myneta_url": row.get("myneta_url") or "",
-                        "myneta_candidate_id": row.get("myneta_candidate_id"),
-                        "criminal_cases": row.get("criminal_cases", 0),
-                        "education": row.get("education") or "",
-                        "assets_value": row.get("assets_value", 0),
-                        "liabilities_value": row.get("liabilities_value", 0),
-                        "nomination_status": "myneta_bootstrap",
-                        "is_independent": (row.get("party") or "").upper() in ["IND", "INDEPENDENT"],
-                        "removed": False,
-                        "removed_at": None,
-                        "myneta_last_synced_at": _utc_now_iso(),
-                    }
-                    batch.append(payload)
-
-                    if len(batch) >= 50:
-                        unique = {item["id"]: item for item in batch}
-                        supabase.table("candidates").upsert(list(unique.values())).execute()
-                        print(f"    [>>>] Bootstrapped {len(unique)} candidates.", flush=True)
-                        batch = []
-
-            if batch:
-                unique = {item["id"]: item for item in batch}
-                supabase.table("candidates").upsert(list(unique.values())).execute()
-                print(f"    [>>>] Bootstrapped final batch {len(unique)} candidates.", flush=True)
-
-        browser.close()
-
-    return seen_by_prefix
-
-
-def bootstrap_candidates_from_manual_seed(
-    db_constituencies: list[dict],
-    *,
-    prefixes: set[str] | None = None,
-    csv_path: str = MANUAL_CANDIDATE_SEED_PATH,
-) -> dict[str, set[str]]:
-    """
-    Load repo-tracked fallback candidate rows when both ECI and MyNeta are unavailable.
-    Intended for temporary official party / EC announcement lists.
-    """
-    seen_by_prefix: dict[str, set[str]] = {}
-    if not supabase:
-        return seen_by_prefix
-    if not os.path.exists(csv_path):
-        print(f"\n[!] Manual candidate seed not found: {csv_path}", flush=True)
-        return seen_by_prefix
-
-    print(f"\n[+] Manual fallback: loading candidates from {os.path.basename(csv_path)}...", flush=True)
-
-    with open(csv_path, "r", encoding="utf-8-sig", newline="") as fh:
-        rows = list(csv.DictReader(fh))
-
-    if not rows:
-        print("    [!] Manual candidate seed is empty.", flush=True)
-        return seen_by_prefix
-
-    consts_by_prefix: dict[str, list[dict]] = {}
-    const_name_to_id_by_prefix: dict[str, dict[str, str]] = {}
-    for c in db_constituencies:
-        c_id = c.get("id") or ""
-        prefix = c_id.split("-")[0] if c_id else ""
-        if not prefix:
-            continue
-        consts_by_prefix.setdefault(prefix, []).append(c)
-        if c.get("name"):
-            const_name_to_id_by_prefix.setdefault(prefix, {})[c["name"]] = c_id
-
-    batch: list[dict] = []
-    processed_ledger = set()
-    loaded = 0
-
-    for row in rows:
-        prefix = (row.get("state_prefix") or row.get("prefix") or "").strip().upper()
-        if not prefix:
-            continue
-        if prefixes is not None and prefix not in prefixes:
-            continue
-
-        state_consts = consts_by_prefix.get(prefix) or []
-        const_name_to_id = const_name_to_id_by_prefix.get(prefix) or {}
-        if not state_consts or not const_name_to_id:
-            print(f"    [SKIP] No constituency mapping found for prefix {prefix}.", flush=True)
-            continue
-
-        candidate_name = (row.get("candidate_name") or row.get("name") or "").strip()
-        constituency_name = (row.get("constituency_name") or row.get("constituency") or "").strip()
-        if not candidate_name or not constituency_name:
-            continue
-
-        matched_const_name = best_constituency_name_match(constituency_name, list(const_name_to_id.keys()))
-        if not matched_const_name:
-            print(f"    [?] UNMAPPED manual constituency for {candidate_name}: '{constituency_name}'", flush=True)
-            continue
-
-        constituency_id = const_name_to_id.get(matched_const_name)
-        if not constituency_id:
-            continue
-
-        ledger_key = f"{constituency_id}_{clean_full_name(candidate_name)}"
-        if ledger_key in processed_ledger:
-            continue
-        processed_ledger.add(ledger_key)
-
-        cand_id = f"cand-{constituency_id}-{candidate_name.replace(' ', '').lower()[:8]}"
-        seen_by_prefix.setdefault(prefix, set()).add(cand_id)
-
-        party = (row.get("party") or "").strip()
-        incumbent = _parse_bool(row.get("incumbent"))
-        source_url = (row.get("source_url") or "").strip()
-        source_label = (row.get("source_label") or row.get("notes") or "Manual fallback seed").strip()
-        payload = {
-            "id": cand_id,
-            "constituency_id": constituency_id,
-            "name": candidate_name.title(),
-            "party": party,
-            "party_abbreviation": (row.get("party_abbreviation") or "").strip() or None,
-            "source_url": source_url or None,
-            "nomination_status": (row.get("nomination_status") or "manual_seed").strip(),
-            "is_independent": party.upper() in ["IND", "INDEPENDENT"],
-            "removed": False,
-            "removed_at": None,
-            "background": source_label[:220],
-        }
-        if incumbent is not None:
-            payload["incumbent"] = incumbent
-        batch.append(payload)
-        loaded += 1
-
-        if len(batch) >= 100:
-            unique = {item["id"]: item for item in batch}
-            supabase.table("candidates").upsert(list(unique.values())).execute()
-            print(f"    [>>>] Seeded {len(unique)} manual candidates.", flush=True)
-            batch = []
-
-    if batch:
-        unique = {item["id"]: item for item in batch}
-        supabase.table("candidates").upsert(list(unique.values())).execute()
-        print(f"    [>>>] Seeded final batch {len(unique)} manual candidates.", flush=True)
-
-    if loaded == 0:
-        print("    [!] No matching manual fallback rows were loaded.", flush=True)
-    else:
-        print(f"    [OK] Loaded {loaded} manual fallback candidates.", flush=True)
-
-    return seen_by_prefix
 
 
 def _parse_myneta_profile_html(text: str) -> dict:
@@ -1138,11 +837,6 @@ def enrich_candidates_from_myneta(*, headless: bool = True) -> None:
             print(f" MYNETA TARGET: {state_name.upper()} (pages {pages})", flush=True)
             print(f"======================================", flush=True)
 
-            available, reason = probe_myneta_summary_availability(pw_page, base)
-            if not available:
-                print(f"    [SKIP] {state_name}: {reason}.", flush=True)
-                continue
-
             merged = 0
             unresolved = 0
 
@@ -1283,12 +977,6 @@ def _myneta_worker_run(cfg: dict, *, headless: bool) -> dict:
             viewport={"width": 1280, "height": 900},
         )
         pw_page = ctx.new_page()
-
-        available, reason = probe_myneta_summary_availability(pw_page, base)
-        if not available:
-            ctx.close()
-            browser.close()
-            return {"state": cfg.get("name"), "merged": 0, "unresolved": 0, "error": None, "skipped_reason": reason}
 
         for page in range(1, pages + 1):
             try:
@@ -1445,8 +1133,6 @@ def main() -> None:
                     r = results[-1]
                     if r.get("error"):
                         print(f"    [!] {r.get('state')}: {r.get('error')}", flush=True)
-                    elif r.get("skipped_reason"):
-                        print(f"    [SKIP] {r.get('state')}: {r.get('skipped_reason')}", flush=True)
                     else:
                         print(f"    [OK] {r.get('state')}: Enriched={r.get('merged')} Unresolved={r.get('unresolved')}", flush=True)
         print("\n[OK] MYNETA SYNC COMPLETE.")
@@ -1459,57 +1145,12 @@ def main() -> None:
         return
 
     seen_map = scrape_and_upsert_eci_candidates(db_constituencies, headless=args.eci_headless)
-    prefixes_missing_eci = {
-        state["prefix"]
-        for state in ECI_STATE_CONFIG
-        if not seen_map.get(state["prefix"])
-    }
-    fallback_seen_map: dict[str, set[str]] = {}
-    if prefixes_missing_eci and not args.eci_only:
-        print(
-            "\n[!] ECI returned no candidates for one or more configured states. "
-            "Falling back to MyNeta bootstrap for those states.",
-            flush=True,
-        )
-        fallback_seen_map = bootstrap_candidates_from_myneta(
-            db_constituencies,
-            headless=not args.myneta_visible,
-            prefixes=prefixes_missing_eci,
-        )
-    prefixes_missing_live = {
-        state["prefix"]
-        for state in ECI_STATE_CONFIG
-        if not seen_map.get(state["prefix"]) and not fallback_seen_map.get(state["prefix"])
-    }
-    manual_seen_map: dict[str, set[str]] = {}
-    if prefixes_missing_live and not args.eci_only:
-        print(
-            "\n[!] Some states still have no live candidate source. "
-            "Trying repo-tracked manual fallback seed for those states.",
-            flush=True,
-        )
-        manual_seen_map = bootstrap_candidates_from_manual_seed(
-            db_constituencies,
-            prefixes=prefixes_missing_live,
-        )
-
     for state in ECI_STATE_CONFIG:
         prefix = state["prefix"]
-        seen = (
-            seen_map.get(prefix, set())
-            or fallback_seen_map.get(prefix, set())
-            or manual_seen_map.get(prefix, set())
-        )
+        seen = seen_map.get(prefix, set())
         mark_removed_candidates(prefix, seen)
 
     if args.eci_only:
-        if prefixes_missing_eci:
-            print(
-                "\n[!] ECI returned zero candidates for: "
-                + ", ".join(sorted(prefixes_missing_eci))
-                + ". Run without --eci-only to allow MyNeta / manual seed fallback.",
-                flush=True,
-            )
         print("\n[OK] ECI SYNC COMPLETE (--eci-only; skipped MyNeta).")
         return
 
@@ -1529,8 +1170,6 @@ def main() -> None:
                 r = results[-1]
                 if r.get("error"):
                     print(f"    [!] {r.get('state')}: {r.get('error')}", flush=True)
-                elif r.get("skipped_reason"):
-                    print(f"    [SKIP] {r.get('state')}: {r.get('skipped_reason')}", flush=True)
                 else:
                     print(f"    [OK] {r.get('state')}: Enriched={r.get('merged')} Unresolved={r.get('unresolved')}", flush=True)
     print("\n[OK] FULL DOSSIER PIPELINE COMPLETE (ECI + MyNeta).")
