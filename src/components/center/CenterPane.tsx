@@ -6,7 +6,6 @@ import SignalsCenterPane from "./SignalsCenterPane";
 import VideosCenterPane from "./VideosCenterPane";
 import LiveCenterPane from "./LiveCenterPane";
 import { OpinionPollsPane } from "@/components/polls/OpinionPollsPane";
-import TrendsCenterPane from "./TrendsCenterPane";
 
 // Dynamic import with no SSR (react-simple-maps)
 const IndiaMap = dynamic(() => import("@/components/map/IndiaMap"), { ssr: false });
@@ -64,7 +63,6 @@ export default function CenterPane({
   if (mode === "videos") return <VideosCenterPane globalStateFilter={globalStateFilter} onSelectSignal={(s) => setActiveSignal(s)} />;
   if (mode === "live") return <LiveCenterPane activeTab={liveTab} onChangeTab={onChangeLiveTab} />;
   if (mode === "polls") return <OpinionPollsPane />;
-  if (mode === "trends") return <TrendsCenterPane globalStateFilter={globalStateFilter} onChangeGlobalStateFilter={onChangeGlobalStateFilter} />;
 
   return (
     <IndiaMap
