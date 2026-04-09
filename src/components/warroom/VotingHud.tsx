@@ -5,7 +5,14 @@ import { ChevronUp, ChevronDown, Activity, BarChart3, Clock, PieChart, CheckCirc
 import { useLiveData } from "@/lib/context/LiveDataContext";
 import { ELECTION_DATES } from "@/lib/utils/countdown";
 import { getWarRoomPhase, istMinutesSinceMidnight, sameISTCalendarDay } from "@/lib/utils/warRoomSchedule";
-import { safeNewsArticleHref } from "@/lib/utils/newsUrls";
+import {
+  articleLinkUiLabel,
+  contextualSearchUrl,
+  safeNewsArticleHref,
+} from "@/lib/utils/newsUrls";
+import LiveElectionTimeline from "@/components/warroom/LiveElectionTimeline";
+
+const MAX_NOTES_PER_STATE = 4;
 
 function latestTurnoutRow(rows: any[], state: string) {
   const list = rows.filter((t) => t.state === state);
@@ -291,6 +298,22 @@ export default function VotingHud({
 
       {(variant === "embedded" || !isDesktopCollapsed) && (
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3 pb-6 md:p-4 md:pb-4">
+          {isVoting ? (
+            <LiveElectionTimeline
+              now={now}
+              variant="voting"
+              isPollCalendarDay={isPollCalendarDay}
+              warPhase={warPhase}
+            />
+          ) : isCounting ? (
+            <LiveElectionTimeline
+              now={now}
+              variant="counting"
+              isPollCalendarDay={isPollCalendarDay}
+              warPhase={warPhase}
+            />
+          ) : null}
+
           {/* Sticky: phase + status + refresh (mobile-first) */}
           {isVoting && activeTab === "TURNOUT" ? (
             <div className="sticky top-0 z-10 -mx-3 mb-3 border-b border-[color:var(--border)] bg-[var(--surface-1)]/95 px-3 pb-2 pt-2 backdrop-blur-md md:static md:mx-0 md:border-b-0 md:bg-transparent md:px-0 md:pb-0 md:pt-0">
@@ -346,47 +369,52 @@ export default function VotingHud({
                 const timeSlot = String(stateData?.time_slot || "");
                 const phase = turnoutPhaseShort(timeSlot);
                 const rel = formatRelativeUpdated(stateData?.updated_at);
-                const syncBit = rel ? ` · updated ${rel}` : " · no sync time";
-                const status = avgT > 0
-                  ? `${phase}${syncBit}`
-                  : stateData
-                    ? `Awaiting estimate · ${phase}${syncBit}`
-                    : "Awaiting ingest · tap REFRESH or wait for worker";
 
                 return (
-                  <div key={state} className="flex flex-col rounded-xl border border-[color:var(--border)] bg-[var(--surface-1)] p-3 shadow-sm">
-                    <div className="mb-1.5 flex items-start justify-between gap-2">
-                      <span className="font-mono text-[10px] font-bold tracking-wide text-[var(--text-primary)]">{state.toUpperCase()}</span>
-                      <span className="shrink-0 rounded-md border border-sky-200 bg-sky-50 px-2 py-0.5 font-mono text-[9px] font-bold text-sky-900 dark:border-[#0284c7]/20 dark:bg-[#0284c7]/8 dark:text-sky-200">
-                        {status}
+                  <div
+                    key={state}
+                    className="flex flex-col rounded-xl border border-[color:var(--border)] bg-[var(--surface-1)] p-3 shadow-sm ring-1 ring-black/[0.03] dark:ring-white/[0.04]"
+                  >
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <span className="font-mono text-[11px] font-bold tracking-wide text-[var(--text-primary)]">
+                        {state.toUpperCase()}
+                      </span>
+                      <span className="shrink-0 rounded-full border border-sky-200/80 bg-sky-50 px-2.5 py-1 font-mono text-[9px] font-semibold uppercase tracking-wide text-sky-950 dark:border-sky-500/30 dark:bg-sky-500/15 dark:text-sky-100">
+                        {phase}
                       </span>
                     </div>
 
                     {avgT > 0 ? (
-                      <div className="flex items-end gap-2 mb-1.5">
-                        <span className="text-[28px] font-bold text-[var(--text-primary)] leading-none tabular-nums">
-                          {`${minT}–${maxT}%`}
-                        </span>
-                        <span className="font-mono text-[9px] text-[var(--text-muted)] mb-1">TURNOUT</span>
-                      </div>
-                    ) : (
-                      <div className="mb-1.5">
-                        <div className="text-[14px] font-semibold text-[var(--text-primary)]">Awaiting estimate</div>
-                        <div className="mt-0.5 font-mono text-[9px] text-[var(--text-muted)]">
-                          No numeric turnout detected yet.
+                      <>
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="text-[clamp(1.35rem,4vw,1.65rem)] font-bold leading-none tabular-nums text-[var(--text-primary)]">
+                            {`${minT}–${maxT}%`}
+                          </span>
+                          <span className="font-mono text-[10px] font-semibold text-[var(--text-secondary)]">TURNOUT</span>
                         </div>
+                        <p className="mt-1.5 text-[11px] leading-snug text-[var(--text-secondary)]">
+                          Updated {rel || "—"} · unofficial · wire snapshot
+                        </p>
+                      </>
+                    ) : (
+                      <div className="mb-0.5">
+                        <div className="text-[15px] font-semibold text-[var(--text-primary)]">Awaiting estimate</div>
+                        <p className="mt-1 text-[11px] leading-snug text-[var(--text-secondary)]">
+                          No numeric turnout yet · {phase}
+                          {rel ? ` · updated ${rel}` : ""}
+                        </p>
                       </div>
                     )}
 
                     {avgT > 0 ? (
-                      <div className="w-full bg-[var(--surface-3)] h-2 rounded-full overflow-hidden">
+                      <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-[var(--surface-3)]">
                         <div
-                          className="h-full bg-gradient-to-r from-[#0284c7] to-[#0369a1] transition-all duration-700 rounded-full"
+                          className="h-full rounded-full bg-gradient-to-r from-[#0284c7] to-[#0369a1] transition-all duration-700"
                           style={{ width: `${Math.min(100, Math.max(0, avgT))}%` }}
                         />
                       </div>
                     ) : (
-                      <div className="w-full bg-[var(--surface-3)] h-2 rounded-full overflow-hidden opacity-60" />
+                      <div className="mt-3 h-2 w-full rounded-full bg-[var(--surface-3)] opacity-60" />
                     )}
                   </div>
                 );
@@ -395,24 +423,39 @@ export default function VotingHud({
           )}
 
           {isVoting && activeTab === "TURNOUT" && (
-            <div className="mt-4 rounded-xl border border-[color:var(--border)] bg-[var(--surface-1)] p-3 md:p-4">
-              <div className="flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  onClick={() => setNotesOpen((v) => !v)}
-                  className="inline-flex items-center gap-2 rounded-md border border-[color:var(--border)] bg-[var(--surface-1)] px-2 py-1 font-mono text-[10px] font-bold tracking-wider text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
-                  aria-expanded={notesOpen}
-                >
-                  {notesOpen ? <ChevronUp className="h-3.5 w-3.5 text-[var(--text-muted)]" /> : <ChevronDown className="h-3.5 w-3.5 text-[var(--text-muted)]" />}
-                  NOTES & SOURCES
-                </button>
-                <div className="flex gap-1 overflow-x-auto">
+            <div className="mt-4 rounded-xl border border-[color:var(--border)] bg-[var(--surface-2)]/40 p-3 ring-1 ring-black/[0.02] dark:bg-[var(--surface-1)] dark:ring-white/[0.04] md:p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
                   <button
                     type="button"
+                    onClick={() => setNotesOpen((v) => !v)}
+                    className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-[color:var(--border)] bg-[var(--surface-1)] px-3 py-2 font-mono text-[10px] font-bold tracking-wider text-[var(--text-secondary)] shadow-sm hover:bg-[var(--surface-2)] md:min-h-0 md:py-1.5"
+                    aria-expanded={notesOpen}
+                  >
+                    {notesOpen ? (
+                      <ChevronUp className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
+                    ) : (
+                      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
+                    )}
+                    NOTES & SOURCES
+                  </button>
+                  <p className="mt-1.5 hidden text-[11px] text-[var(--text-secondary)] sm:block">
+                    Up to {MAX_NOTES_PER_STATE} items per state · verified links when the worker stored a URL
+                  </p>
+                </div>
+                <div
+                  className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 [-ms-overflow-style:none] [scrollbar-width:none] sm:max-w-[55%] [&::-webkit-scrollbar]:hidden"
+                  role="tablist"
+                  aria-label="Filter notes by state"
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={notesState === "ALL"}
                     onClick={() => setNotesState("ALL")}
-                    className={`shrink-0 rounded-md px-2.5 py-1.5 font-mono text-[9px] font-bold border ${
+                    className={`shrink-0 rounded-lg border px-3 py-2.5 font-mono text-[10px] font-bold transition-colors md:py-2 ${
                       notesState === "ALL"
-                        ? "border-sky-200 bg-sky-50 text-sky-900 dark:border-sky-500/25 dark:bg-sky-500/10 dark:text-sky-200"
+                        ? "border-sky-300 bg-sky-50 text-sky-950 dark:border-sky-500/35 dark:bg-sky-500/15 dark:text-sky-100"
                         : "border-[color:var(--border)] bg-[var(--surface-1)] text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
                     }`}
                   >
@@ -422,9 +465,13 @@ export default function VotingHud({
                     <button
                       key={st}
                       type="button"
+                      role="tab"
+                      aria-selected={notesState === st}
                       onClick={() => setNotesState(st)}
-                      className={`shrink-0 rounded-md px-2.5 py-1.5 font-mono text-[9px] font-bold border ${
-                        notesState === st ? "border-emerald-500/25 bg-emerald-500/10 text-[#16a34a]" : "border-[color:var(--border)] bg-[var(--surface-1)] text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
+                      className={`shrink-0 rounded-lg border px-3 py-2.5 font-mono text-[10px] font-bold transition-colors md:py-2 ${
+                        notesState === st
+                          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                          : "border-[color:var(--border)] bg-[var(--surface-1)] text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
                       }`}
                     >
                       {st.toUpperCase()}
@@ -432,6 +479,9 @@ export default function VotingHud({
                   ))}
                 </div>
               </div>
+              <p className="mt-2 text-[11px] text-[var(--text-secondary)] sm:hidden">
+                Up to {MAX_NOTES_PER_STATE} items per state · tap a link to open the source
+              </p>
 
               {!notesOpen ? (
                 <div className="mt-3 rounded-lg border border-[color:var(--border)] bg-[var(--surface-2)] px-3 py-2">
@@ -467,65 +517,105 @@ export default function VotingHud({
                   </button>
                 </div>
               ) : (
-                <div className="mt-3 grid gap-2">
+                <div className="mt-3 grid gap-3">
                   {(notesState === "ALL" ? activeStates : [notesState]).map((st) => {
                     const row = latestTurnoutByState.get(st);
                     const bullets = filterRenderableBoothNews(row?.booth_news);
                     return (
-                      <div key={st} className="rounded-lg border border-[color:var(--border)] bg-[var(--surface-2)] px-3 py-2">
-                        <div className="flex items-center justify-between">
-                          <span className="font-mono text-[9px] font-bold tracking-wider text-[var(--text-primary)]">{st.toUpperCase()}</span>
-                          <span className="font-mono text-[8px] text-[var(--text-muted)]" suppressHydrationWarning>
+                      <div
+                        key={st}
+                        className="rounded-xl border border-[color:var(--border)] bg-[var(--surface-1)] px-3 py-3 shadow-sm md:px-4 md:py-3.5"
+                      >
+                        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                          <span className="font-mono text-[10px] font-bold tracking-wider text-[var(--text-primary)]">
+                            {st.toUpperCase()}
+                          </span>
+                          <span
+                            className="font-mono text-[10px] text-[var(--text-secondary)]"
+                            suppressHydrationWarning
+                          >
                             {row?.updated_at
                               ? `Updated ${formatRelativeUpdated(row.updated_at) || "—"}`
-                              : "AWAITING"}
+                              : "Awaiting data"}
                           </span>
                         </div>
                         {bullets.length > 0 ? (
-                          <div className="mt-2 grid gap-1.5">
-                            {bullets.slice(0, 6).map((n: any, idx: number) => {
+                          <ul className="mt-3 list-none space-y-2.5 p-0">
+                            {bullets.slice(0, MAX_NOTES_PER_STATE).map((n: Record<string, unknown>, idx: number) => {
                               const isMeta = n.type === "methodology";
                               const isCit = n.type === "citation";
-                              const linkHref =
-                                typeof n.source === "string" && n.source.trim().startsWith("http")
-                                  ? safeNewsArticleHref(n.source, String(n.text || ""))
+                              const srcRaw = typeof n.source === "string" ? n.source.trim() : "";
+                              const hasHttpSource = /^https?:\/\//i.test(srcRaw);
+                              const noteText = String(n.text || "").trim();
+                              const fallbackQ = `${st} assembly election 2026 ${noteText}`;
+                              const primaryHref =
+                                !isMeta && hasHttpSource ? safeNewsArticleHref(srcRaw, fallbackQ) : "";
+                              const searchHref =
+                                !isMeta && !hasHttpSource && noteText.length >= 12
+                                  ? contextualSearchUrl(st, noteText)
                                   : "";
+                              const href = primaryHref || searchHref;
+                              const linkLabel = href ? articleLinkUiLabel(href) : "";
+                              const isSearchOnly = Boolean(searchHref && !primaryHref);
+
                               return (
-                                <div
+                                <li
                                   key={idx}
-                                  className={`text-[11px] leading-snug flex items-start gap-2 rounded px-2 py-1 border ${
-                                    isMeta
-                                      ? "bg-[var(--surface-1)] text-[var(--text-secondary)] italic border-[color:var(--border)]"
-                                      : "bg-[var(--surface-1)] text-[var(--text-primary)] border-[color:var(--border)]"
+                                  className={`rounded-lg border border-[color:var(--border)] bg-[var(--surface-2)]/50 px-3 py-2.5 dark:bg-[var(--surface-2)]/30 ${
+                                    isMeta ? "border-dashed" : ""
                                   }`}
                                 >
-                                  <span className={`mt-0.5 shrink-0 ${isCit ? "text-[#0284c7]" : "text-[#ea580c]"}`}>
-                                    {isCit ? "↗" : "▸"}
-                                  </span>
-                                  <span className="min-w-0">
-                                    {n.text}
-                                    {linkHref ? (
-                                      <a
-                                        href={linkHref}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        title="Open source"
-                                        className="text-[#0284c7] ml-1 hover:underline inline-flex items-center align-middle"
+                                  <div className="flex gap-3">
+                                    <span
+                                      className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
+                                        isMeta ? "bg-zinc-400" : isCit ? "bg-sky-500" : "bg-amber-500"
+                                      }`}
+                                      aria-hidden
+                                    />
+                                    <div className="min-w-0 flex-1">
+                                      <p
+                                        className={`text-[13px] leading-snug ${
+                                          isMeta
+                                            ? "italic text-[var(--text-secondary)]"
+                                            : "text-[var(--text-primary)]"
+                                        }`}
                                       >
-                                        <ExternalLink className="h-3 w-3" />
-                                      </a>
-                                    ) : null}
-                                  </span>
-                                </div>
+                                        {String(n.text ?? "")}
+                                      </p>
+                                      {href ? (
+                                        <a
+                                          href={href}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="mt-2 inline-flex min-h-11 w-full max-w-full items-center gap-2 rounded-lg border border-sky-500/25 bg-sky-500/[0.07] px-3 py-2 text-left text-[12px] font-medium text-sky-700 transition-colors hover:bg-sky-500/15 dark:text-sky-200 dark:hover:bg-sky-500/20 md:min-h-0 md:w-auto md:border-transparent md:bg-transparent md:px-0 md:py-1"
+                                        >
+                                          <ExternalLink className="h-4 w-4 shrink-0 opacity-90" aria-hidden />
+                                          <span className="min-w-0 break-words">{linkLabel}</span>
+                                          {isSearchOnly ? (
+                                            <span className="ml-auto shrink-0 rounded bg-[var(--surface-3)] px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase text-[var(--text-muted)] md:ml-2">
+                                              Find
+                                            </span>
+                                          ) : null}
+                                        </a>
+                                      ) : !isMeta ? (
+                                        <p className="mt-2 text-[11px] text-[var(--text-muted)]">
+                                          No URL on file for this line.
+                                        </p>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                </li>
                               );
                             })}
-                          </div>
+                          </ul>
                         ) : row ? (
-                          <div className="mt-2 text-[11px] text-[var(--text-muted)] italic">
+                          <div className="mt-3 text-[12px] leading-snug text-[var(--text-secondary)]">
                             No readable notes after last sync — tap REFRESH or wait for the worker.
                           </div>
                         ) : (
-                          <div className="mt-2 text-[11px] text-[var(--text-muted)] italic">Awaiting first ingest cycle…</div>
+                          <div className="mt-3 text-[12px] text-[var(--text-secondary)]">
+                            Awaiting first ingest cycle…
+                          </div>
                         )}
                       </div>
                     );
