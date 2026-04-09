@@ -87,8 +87,9 @@ export default function VotingHud({
   }, [operationMode, isMobileOpen, isDesktopCollapsed, activeTab]);
 
   const now = simulatedDate || new Date();
-  const isVoting = operationMode === "VOTING_DAY";
   const isCounting = operationMode === "COUNTING_DAY";
+  // Any live war-room mode except counting (handles env aliases like POLL / LIVE once normalized, and edge values).
+  const isVoting = operationMode !== "PRE-POLL" && !isCounting;
 
   const isPollCalendarDay = [ELECTION_DATES.phase1, ELECTION_DATES.phase2, ELECTION_DATES.phase2b].some((d) => sameISTCalendarDay(now, d));
   const warPhase = getWarRoomPhase(now, isPollCalendarDay);

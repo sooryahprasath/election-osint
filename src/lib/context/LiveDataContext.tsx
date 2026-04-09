@@ -1,7 +1,8 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { normalizeOperationMode } from "@/lib/config/operationMode";
 
 const SIGNALS_PAGE_SIZE = 500;
 
@@ -41,7 +42,12 @@ export const LiveDataProvider = ({ children }: { children: React.ReactNode }) =>
 
   const [isConnected, setIsConnected] = useState(false);
   const [simulatedDate, setSimulatedDate] = useState<Date | null>(null);
-  const [operationMode, setOperationMode] = useState<string>(process.env.NEXT_PUBLIC_OPERATION_MODE || "PRE-POLL");
+  const [operationMode, setOperationModeState] = useState<string>(() =>
+    normalizeOperationMode(process.env.NEXT_PUBLIC_OPERATION_MODE || "PRE-POLL")
+  );
+  const setOperationMode = useCallback((mode: string) => {
+    setOperationModeState(normalizeOperationMode(mode));
+  }, []);
 
   // Helper to bypass 1000 limit silently in the background
   const fetchHeavyTable = async (table: string) => {
@@ -266,6 +272,7 @@ export const LiveDataProvider = ({ children }: { children: React.ReactNode }) =>
       isConnected,
       simulatedDate,
       operationMode,
+      setOperationMode,
     ]
   );
 

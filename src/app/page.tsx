@@ -153,7 +153,13 @@ export default function Home() {
                   value={centerMode}
                   onChange={setCenterMode}
                   showLive={operationMode !== "PRE-POLL"}
-                  liveLabel={operationMode === "VOTING_DAY" ? "VOTING LIVE" : operationMode === "COUNTING_DAY" ? "COUNTING LIVE" : "LIVE"}
+                  liveLabel={
+                    operationMode === "COUNTING_DAY"
+                      ? "COUNTING LIVE"
+                      : operationMode !== "PRE-POLL"
+                        ? "VOTING LIVE"
+                        : "LIVE"
+                  }
                 />
               </div>
             </div>
@@ -170,7 +176,13 @@ export default function Home() {
                   value={centerMode}
                   onChange={setCenterMode}
                   showLive={operationMode !== "PRE-POLL"}
-                  liveLabel={operationMode === "VOTING_DAY" ? "VOTING LIVE" : operationMode === "COUNTING_DAY" ? "COUNTING LIVE" : "LIVE"}
+                  liveLabel={
+                    operationMode === "COUNTING_DAY"
+                      ? "COUNTING LIVE"
+                      : operationMode !== "PRE-POLL"
+                        ? "VOTING LIVE"
+                        : "LIVE"
+                  }
                 />
                 {/* Hidden for now (per UX feedback). */}
               </div>
