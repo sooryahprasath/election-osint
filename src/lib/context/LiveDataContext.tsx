@@ -13,6 +13,7 @@ interface LiveDataContextProps {
   turnoutData: any[];
   exitPolls: any[];
   liveResults: any[];
+  opinionPolls: any[];
   isConnected: boolean;
   refreshSignals: () => Promise<void>;
   refreshWarRoom: () => Promise<void>;
@@ -23,7 +24,7 @@ interface LiveDataContextProps {
 }
 
 const LiveDataContext = createContext<LiveDataContextProps>({
-  constituencies: [], candidates: [], signals: [], turnoutData: [], exitPolls: [], liveResults: [],
+  constituencies: [], candidates: [], signals: [], turnoutData: [], exitPolls: [], liveResults: [], opinionPolls: [],
   isConnected: false, simulatedDate: null, setSimulatedDate: () => { },
   refreshSignals: async () => { },
   refreshWarRoom: async () => { },
@@ -39,6 +40,7 @@ export const LiveDataProvider = ({ children }: { children: React.ReactNode }) =>
   const [turnoutData, setTurnoutData] = useState<any[]>([]);
   const [exitPolls, setExitPolls] = useState<any[]>([]);
   const [liveResults, setLiveResults] = useState<any[]>([]);
+  const [opinionPolls, setOpinionPolls] = useState<any[]>([]);
 
   const [isConnected, setIsConnected] = useState(false);
   const [simulatedDate, setSimulatedDate] = useState<Date | null>(null);
@@ -85,12 +87,13 @@ export const LiveDataProvider = ({ children }: { children: React.ReactNode }) =>
     // 1. FAST PAYLOAD: Load Map, News, and HUD data instantly
     const loadVanguardData = async () => {
       try {
-        const [cwRes, sigRes, turnRes, exitRes, liveRes] = await Promise.all([
+        const [cwRes, sigRes, turnRes, exitRes, liveRes, pollRes] = await Promise.all([
           supabase.from("constituencies").select("*").limit(2000),
           supabase.from("signals").select("*").order("created_at", { ascending: false }).limit(SIGNALS_PAGE_SIZE),
           supabase.from("voter_turnout").select("*"),
           supabase.from("exit_polls").select("*"),
-          supabase.from("live_results").select("*")
+          supabase.from("live_results").select("*"),
+          supabase.from("opinion_polls").select("*").order("publish_date", { ascending: false }).limit(200),
         ]);
 
         if (isMounted) {
@@ -99,6 +102,7 @@ export const LiveDataProvider = ({ children }: { children: React.ReactNode }) =>
           if (turnRes.data) setTurnoutData(turnRes.data);
           if (exitRes.data) setExitPolls(exitRes.data);
           if (liveRes.data) setLiveResults(liveRes.data);
+          if (pollRes.data) setOpinionPolls(pollRes.data);
           setIsConnected(true);
         }
       } catch (err) {
@@ -201,6 +205,9 @@ export const LiveDataProvider = ({ children }: { children: React.ReactNode }) =>
           setLiveResults((prev) => prev.map((lr) => (lr.id === payload.new.id ? payload.new : lr)));
         }
       })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "opinion_polls" }, (payload) => {
+        if (isMounted) setOpinionPolls((prev) => [payload.new, ...prev]);
+      })
       .subscribe((status, err) => {
         // 🔥 FIX: Added error logging so you know if Supabase disconnects
         if (status === 'SUBSCRIBED') {
@@ -228,6 +235,7 @@ export const LiveDataProvider = ({ children }: { children: React.ReactNode }) =>
       turnoutData,
       exitPolls,
       liveResults,
+      opinionPolls,
       isConnected,
       refreshSignals: async () => {
         const { data } = await supabase
@@ -269,6 +277,7 @@ export const LiveDataProvider = ({ children }: { children: React.ReactNode }) =>
       turnoutData,
       exitPolls,
       liveResults,
+      opinionPolls,
       isConnected,
       simulatedDate,
       operationMode,
