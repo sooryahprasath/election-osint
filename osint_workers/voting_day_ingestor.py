@@ -160,6 +160,99 @@ def entry_fallback_text(entry, max_chars: int = 2200) -> str:
     return text[:max_chars]
 
 
+def _unwrap_google_url_query(raw: str) -> str | None:
+    """Extract target URL from https://www.google.com/url?q=..."""
+    try:
+        u = urllib.parse.urlparse((raw or "").strip())
+        host = (u.netloc or "").lower()
+        if host.startswith("www."):
+            host = host[4:]
+        if host == "google.com" and u.path.startswith("/url"):
+            qs = urllib.parse.parse_qs(u.query)
+            for key in ("q", "url"):
+                if key in qs and qs[key]:
+                    inner = urllib.parse.unquote(qs[key][0])
+                    if inner.startswith("http"):
+                        return inner
+    except Exception:
+        pass
+    return None
+
+
+def entry_preferred_link(entry) -> str:
+    """Use Atom/RSS alternate link to publisher when Google exposes it."""
+    primary = (getattr(entry, "link", "") or "").strip()
+    for item in getattr(entry, "links", []) or []:
+        if not isinstance(item, dict):
+            continue
+        href = (item.get("href") or "").strip()
+        if not href.startswith("http") or "news.google.com" in href:
+            continue
+        rel = str(item.get("rel", ""))
+        typ = str(item.get("type", ""))
+        if "alternate" in rel or "html" in typ.lower() or rel in ("", "related"):
+            return href
+    return primary
+
+
+def resolve_publisher_url(raw: str, timeout: float = 12.0) -> str:
+    """
+    Follow Google News redirect pages to the publisher URL when possible.
+    Stored links must not be news.google.com wrappers (browsers often block them).
+    """
+    raw = (raw or "").strip()
+    if not raw.startswith("http"):
+        return raw
+    inner = _unwrap_google_url_query(raw)
+    if inner:
+        raw = inner
+    try:
+        host = urllib.parse.urlparse(raw).netloc.lower()
+    except Exception:
+        return raw
+    if "news.google.com" not in host:
+        return raw
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-IN,en;q=0.9",
+    }
+    try:
+        r = requests.get(raw, headers=headers, timeout=timeout, allow_redirects=True)
+        final = (r.url or raw).strip()
+        fh = urllib.parse.urlparse(final).netloc.lower()
+        if "news.google.com" not in fh and "google.com/url" not in final:
+            return final
+        soup = BeautifulSoup(r.content, "html.parser")
+        can = soup.find("link", rel=lambda x: x and "canonical" in str(x).lower())
+        if can and can.get("href"):
+            h = str(can["href"]).strip()
+            if h.startswith("http") and "news.google.com" not in h:
+                return h
+        og = soup.find("meta", property="og:url")
+        if og and og.get("content"):
+            h = str(og["content"]).strip()
+            if h.startswith("http") and "news.google.com" not in h:
+                return h
+        return final
+    except Exception:
+        return raw
+
+
+def sanitize_booth_news_urls(items: list) -> list[dict]:
+    out: list[dict] = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        d = dict(it)
+        src = d.get("source")
+        if isinstance(src, str) and src.strip().startswith("http"):
+            d["source"] = resolve_publisher_url(src.strip())
+        out.append(d)
+    return out
+
+
 def _feed_entries(url: str) -> list:
     try:
         feed = feedparser.parse(url)
@@ -177,17 +270,22 @@ def fetch_query_chunks(query: str, limit: int, label: str) -> list[str]:
     chunks: list[str] = []
     seen_urls: set[str] = set()
     for entry in _feed_entries(url)[:limit]:
-        link = (getattr(entry, "link", "") or "").strip()
-        if not link or link in seen_urls:
+        link = entry_preferred_link(entry)
+        if not link:
             continue
-        seen_urls.add(link)
-        text = extract_article_text(link) if link else ""
+        resolved = resolve_publisher_url(link)
+        if resolved in seen_urls:
+            continue
+        seen_urls.add(resolved)
+        text = extract_article_text(resolved) if resolved else ""
+        if (not text or len(text) < 50) and link != resolved:
+            text = extract_article_text(link)
         if not text or len(text) < 50:
             text = entry_fallback_text(entry)
         if not text:
             continue
         src = getattr(getattr(entry, "source", None), "title", "") or "feed"
-        chunks.append(f"[{label}] Outlet: {src} | URL: {link} | Text: {text}")
+        chunks.append(f"[{label}] Outlet: {src} | URL: {resolved} | Text: {text}")
     return chunks
 
 
@@ -288,7 +386,7 @@ Given extracted claims (not raw articles), produce:
 - confidence_0_1
 - one sentence methodology_note (no outlet names in the note)
 - booth_news: up to 6 items {{text, source}} — include:
-  * significant booth/EVM/queue/violence lines (source = URL when available)
+  * significant booth/EVM/queue/violence lines; source = the publisher article URL copied exactly from the "URL: ..." field in TEXT (never use news.google.com links)
   * short paraphrases from booth_incidents_raw
 - citations: up to 5 items {{outlet, url}} supporting the turnout range (if any)
 
@@ -327,7 +425,7 @@ Return pure JSON (no markdown):
     note = out.get("methodology_note") or ""
     if note:
         booth.append({"text": note[:280], "source": "", "type": "methodology"})
-    out["booth_news"] = booth
+    out["booth_news"] = sanitize_booth_news_urls(booth)
     return out
 
 
