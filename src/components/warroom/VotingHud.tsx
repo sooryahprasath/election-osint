@@ -322,7 +322,7 @@ export default function VotingHud({
                 <div
                   className={`mb-2 flex gap-2 rounded-md border px-2.5 py-1.5 font-mono text-[8px] leading-snug md:text-[9px] ${
                     phaseBanner.tone === "blue"
-                      ? "border-sky-200 bg-sky-50 text-sky-900 dark:border-sky-500/25 dark:bg-sky-500/10 dark:text-sky-200"
+                      ? "border-sky-300 bg-sky-100 text-sky-950 dark:border-sky-500/25 dark:bg-sky-500/10 dark:text-sky-200"
                       : phaseBanner.tone === "amber"
                         ? "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-200"
                         : phaseBanner.tone === "orange"
@@ -337,7 +337,7 @@ export default function VotingHud({
 
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0 font-mono text-[9px] font-bold text-[var(--text-secondary)]">
-                  Live turnout · <span className="font-mono text-[9px] font-bold text-[var(--text-muted)]">{syncLabel}</span> · unofficial
+                  Live turnout · <span className="font-mono text-[9px] font-bold text-[var(--text-muted)]">{syncLabel}</span> · official (ECI)
                 </div>
                 <button
                   type="button"
@@ -370,6 +370,11 @@ export default function VotingHud({
                 const timeSlot = String(stateData?.time_slot || "");
                 const phase = turnoutPhaseShort(timeSlot);
                 const rel = formatRelativeUpdated(stateData?.updated_at);
+                const booth = Array.isArray(stateData?.booth_news) ? stateData.booth_news : [];
+                const hasEciEncore = booth.some((n: any) => n && typeof n === "object" && String(n.type || "") === "eci_encore");
+                const isOfficial = hasEciEncore || (stateData && Number(stateData.confidence_0_1 || 0) >= 0.86);
+                const turnoutLabel =
+                  avgT > 0 ? (Math.abs(minT - maxT) < 0.005 ? `${minT}%` : `${minT}–${maxT}%`) : "";
 
                 return (
                   <div
@@ -380,8 +385,14 @@ export default function VotingHud({
                       <span className="font-mono text-[11px] font-bold tracking-wide text-[var(--text-primary)]">
                         {state.toUpperCase()}
                       </span>
-                      <span className="shrink-0 rounded-full border border-sky-200/80 bg-sky-50 px-2.5 py-1 font-mono text-[9px] font-semibold uppercase tracking-wide text-sky-950 dark:border-sky-500/30 dark:bg-sky-500/15 dark:text-sky-100">
-                        {phase}
+                      <span
+                        className={`shrink-0 rounded-full border px-2.5 py-1 font-mono text-[9px] font-semibold uppercase tracking-wide ${
+                          isOfficial
+                            ? "border-emerald-200/80 bg-emerald-50 text-emerald-950 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-100"
+                            : "border-sky-200/80 bg-sky-50 text-sky-950 dark:border-sky-500/30 dark:bg-sky-500/15 dark:text-sky-100"
+                        }`}
+                      >
+                        {isOfficial ? "ECI" : phase}
                       </span>
                     </div>
 
@@ -389,12 +400,12 @@ export default function VotingHud({
                       <>
                         <div className="flex items-baseline justify-between gap-2">
                           <span className="text-[clamp(1.35rem,4vw,1.65rem)] font-bold leading-none tabular-nums text-[var(--text-primary)]">
-                            {`${minT}–${maxT}%`}
+                            {turnoutLabel}
                           </span>
                           <span className="font-mono text-[10px] font-semibold text-[var(--text-secondary)]">TURNOUT</span>
                         </div>
                         <p className="mt-1.5 text-[11px] leading-snug text-[var(--text-secondary)]">
-                          Updated {rel || "—"} · unofficial · wire snapshot
+                          Updated {rel || "—"} · {isOfficial ? "official · ECI ECINet" : "unofficial · wire snapshot"}
                         </p>
                       </>
                     ) : (

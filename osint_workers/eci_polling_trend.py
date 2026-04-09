@@ -218,9 +218,16 @@ def _apply_eci_form_submit_parse(page, label: str, phase: str, timeout_ms: int) 
     else:
         page.locator("button").filter(has_text=re.compile(r"submit", re.I)).first.click()
 
-    page.wait_for_timeout(4000)
+    # SPA table update is sometimes delayed; retry once before declaring "no data".
+    page.wait_for_timeout(4500)
     slots = _parse_table_turnout(page)
     latest = _latest_nonzero_pct(slots)
+    if latest is None:
+        page.wait_for_timeout(6500)
+        slots2 = _parse_table_turnout(page)
+        if slots2:
+            slots = slots2
+            latest = _latest_nonzero_pct(slots)
     if latest is None and not slots:
         return None
     return {
@@ -241,7 +248,7 @@ def fetch_eci_polling_trend_batch_playwright(
 ) -> dict[str, Any]:
     """Single browser: iterate states, re-submit each time. Returns { state_name: snapshot }."""
     out: dict[str, Any] = {}
-    to_fetch = [s for s in states if STATE_TO_ECI_LABEL.get(s.strip())]
+    to_fetch = [s for s in states if isinstance(s, str) and STATE_TO_ECI_LABEL.get(s.strip())]
     if not to_fetch:
         return out
 
@@ -255,7 +262,15 @@ def fetch_eci_polling_trend_batch_playwright(
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless)
+        launch_args: list[str] = []
+        if headless:
+            # ECINet is sensitive to automation signals; reduce the most obvious ones.
+            launch_args = [
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+            ]
+        browser = p.chromium.launch(headless=headless, args=launch_args)
         context = browser.new_context(
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -263,17 +278,23 @@ def fetch_eci_polling_trend_batch_playwright(
             ),
             locale="en-IN",
         )
+        if headless:
+            context.add_init_script(
+                """
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                """
+            )
         page = context.new_page()
         try:
             page.goto(ECINET_POLLING_TREND_URL, wait_until="domcontentloaded", timeout=timeout_ms)
             page.wait_for_timeout(2500)
             for st in to_fetch:
-                label = STATE_TO_ECI_LABEL[st.strip()]
                 try:
+                    label = STATE_TO_ECI_LABEL[st.strip()]
                     snap = _apply_eci_form_submit_parse(page, label, phase, timeout_ms)
                     if snap:
                         snap["state"] = st
-                        out[st] = snap
+                    out[st] = snap
                 except Exception:
                     out[st] = None
             browser.close()

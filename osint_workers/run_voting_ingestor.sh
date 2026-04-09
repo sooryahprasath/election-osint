@@ -73,6 +73,18 @@ PY
   python3 -m pip install -q google-genai >/dev/null
 }
 
+ensure_playwright_ready() {
+  # If you already installed via requirements.txt this will no-op.
+  python3 - <<'PY' >/dev/null 2>&1 && return 0
+import playwright.sync_api  # noqa
+print("ok")
+PY
+  echo "Installing missing dependency: playwright" >&2
+  python3 -m pip install -q playwright >/dev/null
+  # Playwright browsers are required for ECINet scraping.
+  python3 -m playwright install chromium >/dev/null
+}
+
 cmd="${1:-}"
 case "${cmd}" in
   start)
@@ -80,6 +92,7 @@ case "${cmd}" in
     need_cmd nohup
     ensure_venv
     ensure_google_genai
+    ensure_playwright_ready
 
     # If already running, don't start another copy.
     pid="$(get_pid)"
@@ -93,7 +106,8 @@ case "${cmd}" in
     : "${TURNOUT_INGEST_MODE:=grounded}"
     : "${VOTING_INGEST_INTERVAL_SEC:=1200}"
     : "${ECI_SCRAPE_GRACE_MIN:=12}"
-    : "${TURNOUT_ECI_HEADLESS:=1}" # set 0 to see the browser (requires a DISPLAY)
+    # ECINet often blocks true headless Chromium. Prefer headed mode; use Xvfb if no DISPLAY.
+    : "${TURNOUT_ECI_HEADLESS:=0}" # 0 = headed (recommended for ECINet); 1 = headless
     export TURNOUT_NUMBERS_SOURCE TURNOUT_INGEST_MODE VOTING_INGEST_INTERVAL_SEC ECI_SCRAPE_GRACE_MIN TURNOUT_ECI_HEADLESS
 
     # Ensure logs flush immediately.
@@ -107,7 +121,16 @@ case "${cmd}" in
       echo "TURNOUT_NUMBERS_SOURCE=${TURNOUT_NUMBERS_SOURCE} TURNOUT_INGEST_MODE=${TURNOUT_INGEST_MODE} VOTING_INGEST_INTERVAL_SEC=${VOTING_INGEST_INTERVAL_SEC} ECI_SCRAPE_GRACE_MIN=${ECI_SCRAPE_GRACE_MIN} TURNOUT_ECI_HEADLESS=${TURNOUT_ECI_HEADLESS}"
     } >>"${LOG_FILE}"
     echo "Starting voting_day_ingestor (logs: ${LOG_FILE})"
-    nohup python3 -u "${ROOT_DIR}/voting_day_ingestor.py" --force-eci >>"${LOG_FILE}" 2>&1 &
+    run_cmd=(python3 -u "${ROOT_DIR}/voting_day_ingestor.py" --force-eci)
+    if [[ "${TURNOUT_ECI_HEADLESS}" == "0" ]] && [[ -z "${DISPLAY:-}" ]]; then
+      if command -v xvfb-run >/dev/null 2>&1; then
+        run_cmd=(xvfb-run -a "${run_cmd[@]}")
+      else
+        echo "WARNING: TURNOUT_ECI_HEADLESS=0 but DISPLAY is not set and xvfb-run is missing." >&2
+        echo "         Install xvfb (apt install xvfb) or export TURNOUT_ECI_HEADLESS=1 (may fail on ECINet)." >&2
+      fi
+    fi
+    nohup "${run_cmd[@]}" >>"${LOG_FILE}" 2>&1 &
     echo $! >"${PID_FILE}"
     echo "Started (pid $(get_pid))."
     ;;
