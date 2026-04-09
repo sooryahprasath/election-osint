@@ -131,7 +131,7 @@ export default function Home() {
 
   return (
     <>
-      <TopBar onSelectTickerSignal={setActiveSignal} />
+      <TopBar onSelectTickerSignal={(s) => setActiveSignal(s as Signal)} />
 
       {/* Center Pane Shell (desktop: between sidebars; mobile: full content under Center tab) */}
       <main
@@ -213,8 +213,8 @@ export default function Home() {
               setGlobalConstituencyId={setGlobalConstituencyId}
               flyToState={flyToState}
               setFlyToState={setFlyToState}
-              setActiveSignal={setActiveSignal}
-              setActiveClusterSignals={setActiveClusterSignals}
+              setActiveSignal={(s) => setActiveSignal(s == null ? null : (s as Signal))}
+              setActiveClusterSignals={(s) => setActiveClusterSignals(s == null ? null : (s as Signal[]))}
               mapOverlayMode={mapOverlayMode}
               setMapOverlayMode={setMapOverlayMode}
               mapVerifiedOnly={mapVerifiedOnly}
@@ -235,7 +235,7 @@ export default function Home() {
           centerMode={centerMode}
           onChangeGlobalStateFilter={handleStateFilter}
           onSelectSignal={(s: unknown) => {
-            setActiveSignal(s);
+            setActiveSignal(s as Signal);
             const nextMode = centerModeForSignal(s);
             setCenterMode(nextMode);
             if (typeof window !== "undefined" && window.innerWidth < 768) setMobileTab("center");
