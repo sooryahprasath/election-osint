@@ -1,0 +1,17 @@
+
+=== START 2026-04-09T06:37:49+00:00 ===
+TURNOUT_NUMBERS_SOURCE=eci TURNOUT_INGEST_MODE=grounded VOTING_INGEST_INTERVAL_SEC=1200 ECI_SCRAPE_GRACE_MIN=12 TURNOUT_ECI_HEADLESS=1
+=== DHARMA-OSINT voting_day_ingestor (IST) ===
+[i] IST 2026-04-09 12:07 | mode=TURNOUT_LIVE | states=['Kerala', 'Assam', 'Puducherry']
+
+[+] LIVE TURNOUT — Kerala, Assam, Puducherry | slot=LIVE · 12:07 IST
+   [i] Turnout pipeline: ECINet batched (slot-aware) + Gemini booth_news only
+
+=== START 2026-04-09T06:38:41+00:00 ===
+TURNOUT_NUMBERS_SOURCE=eci TURNOUT_INGEST_MODE=grounded VOTING_INGEST_INTERVAL_SEC=1200 ECI_SCRAPE_GRACE_MIN=12 TURNOUT_ECI_HEADLESS=1
+=== DHARMA-OSINT voting_day_ingestor (IST) ===
+[i] IST 2026-04-09 12:08 | mode=TURNOUT_LIVE | states=['Kerala', 'Assam', 'Puducherry']
+
+[+] LIVE TURNOUT — Kerala, Assam, Puducherry | slot=LIVE · 12:08 IST
+   [i] Turnout pipeline: ECINet batched (slot-aware) + Gemini booth_news only
+   -> [OK] Kerala  0.0%–0.0%  (conf 0.55)  booth_items=4
