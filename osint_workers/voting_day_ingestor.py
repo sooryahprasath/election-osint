@@ -9,6 +9,8 @@ Schedule (polling calendar days only — see PHASE_STATES):
 
 Env:
   TURNOUT_INGEST_MODE=grounded|rss   default grounded — RSS uses dual LLM + News RSS corpus.
+  TURNOUT_ECI_POLLING_TREND=1   optional — grounded pipeline also scrapes ECINet polling trend (Playwright; see eci_polling_trend.py).
+  VOTING_INGEST_INTERVAL_SEC   optional — seconds between cycles in TURNOUT_LIVE (default 600).
 
 Run under systemd with Restart=always, or cron @reboot + loop.
 Test:  python voting_day_ingestor.py --once

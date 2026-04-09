@@ -7,6 +7,8 @@ Env:
 
 Token discipline: one search-grounded call per state per cycle; optional cheap official page crawl.
   TURNOUT_GROUNDED_MAX_OUTPUT_TOKENS  optional (512–8192, default 8192) — raise if JSON is cut off (finish_reason=MAX_TOKENS).
+  TURNOUT_ECI_POLLING_TREND=1  optional — Playwright scrape of ECINet polling trend (see eci_polling_trend.py).
+  TURNOUT_ECI_HEADLESS=0  optional — show browser when debugging ECI scrape.
 """
 from __future__ import annotations
 
@@ -177,6 +179,47 @@ def merge_official_stub_into_out(out: dict[str, Any], stub: dict[str, Any] | Non
             "type": "official_hint",
         }
         bn.insert(0, line)
+    out["booth_news"] = bn
+
+
+def merge_eci_polling_trend_into_out(out: dict[str, Any], eci: dict[str, Any] | None) -> None:
+    """Apply official ECINet polling-trend snapshot (stronger than CEO homepage stub)."""
+    if not eci:
+        return
+    p = eci.get("latest_pct")
+    if p is None:
+        p = eci.get("turnout_pct")
+    try:
+        p = float(p)
+    except (TypeError, ValueError):
+        return
+    if not (0 < p <= 100):
+        return
+    out["turnout_min"] = round(p, 2)
+    out["turnout_max"] = round(p, 2)
+    try:
+        c = float(out.get("confidence_0_1") or 0.5)
+    except (TypeError, ValueError):
+        c = 0.5
+    out["confidence_0_1"] = min(0.95, max(c, 0.86))
+    url = str(eci.get("source_url") or "").strip()
+    slots = eci.get("slots") or {}
+    slot_txt = ", ".join(f"{k}:{v:g}%" for k, v in list(slots.items())[:8]) if isinstance(slots, dict) else ""
+    phase = str(eci.get("phase") or "1")
+    line_tx = (
+        f"ECI ECINet polling trend (assembly, phase {phase}): latest slice ~{p:g}%."
+        + (f" Table: {slot_txt}" if slot_txt else "")
+    )
+    bn = list(out.get("booth_news") or [])
+    if url.startswith("https://"):
+        bn.insert(
+            0,
+            {
+                "text": line_tx[:280],
+                "source": url[:500],
+                "type": "eci_encore",
+            },
+        )
     out["booth_news"] = bn
 
 
@@ -427,6 +470,20 @@ Hard rules:
         else:
             print(f"      [!] Grounded JSON parse {state}: {e} ({diag}) | head={preview!r}")
             return None
+
+    try:
+        from eci_polling_trend import eci_polling_enabled, fetch_eci_polling_trend_playwright
+
+        if eci_polling_enabled():
+            try:
+                eci_snap = fetch_eci_polling_trend_playwright(state)
+                if eci_snap:
+                    merge_eci_polling_trend_into_out(data, eci_snap)
+                    print(f"      [i] ECI ECINet polling trend {state}: ~{eci_snap.get('latest_pct')}%")
+            except Exception as ex:
+                print(f"      [!] ECI polling trend {state}: {ex}")
+    except ImportError:
+        pass
 
     merge_official_stub_into_out(data, stub)
 
