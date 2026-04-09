@@ -19,7 +19,7 @@ import os
 import sys
 import time
 import urllib.parse
-from datetime import datetime, date
+from datetime import datetime, date, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import feedparser
@@ -33,6 +33,7 @@ env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
 load_dotenv(dotenv_path=env_path)
 
 IST = ZoneInfo("Asia/Kolkata")
+UTC = ZoneInfo("UTC")
 SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -56,6 +57,7 @@ TURNOUT_FINAL = (18, 30)
 EXIT_POLL_START = (19, 15)
 EXIT_POLL_END = (2, 0)  # night window ends 02:00
 
+# Prefer these outlets when Google supports source: filters (often sparse — we always add a broad fallback).
 TRUSTED_BLOCK = (
     'source:"News18" OR source:"ANI" OR source:"Times Now" OR source:"The Hindu" '
     'OR source:"NDTV" OR source:"Indian Express"'
@@ -100,59 +102,125 @@ def run_mode(dt: datetime) -> str:
     return "TURNOUT_FINAL"
 
 
-def extract_article_text(url: str, max_chars: int = 1800) -> str:
+def format_time_slot_ist(now: datetime, *, finalize: bool) -> str:
+    """24h IST label aligned with wall clock (avoids stale-looking 12h AM/PM strings)."""
+    n = now.astimezone(IST)
+    if finalize:
+        return f"FINAL · {n.strftime('%H:%M')} IST"
+    return f"LIVE · {n.strftime('%H:%M')} IST"
+
+
+def parse_supabase_ts(s: str) -> datetime:
+    if not s:
+        return datetime.min.replace(tzinfo=UTC)
+    s2 = s.replace("Z", "+00:00") if s.endswith("Z") else s
+    dt = datetime.fromisoformat(s2)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
+
+def extract_article_text(url: str, max_chars: int = 2200) -> str:
     try:
-        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=12, allow_redirects=True)
+        res = requests.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+            timeout=14,
+            allow_redirects=True,
+        )
         soup = BeautifulSoup(res.content, "html.parser")
-        return " ".join(p.get_text() for p in soup.find_all("p"))[:max_chars]
+        for tag in soup(["script", "style", "nav", "footer", "aside"]):
+            tag.decompose()
+        parts: list[str] = []
+        for p in soup.find_all("p"):
+            t = p.get_text(separator=" ", strip=True)
+            if len(t) > 35:
+                parts.append(t)
+        text = " ".join(parts)
+        if len(text) < 140:
+            og = soup.find("meta", property="og:description") or soup.find("meta", attrs={"name": "description"})
+            if og and og.get("content"):
+                text = (text + " " + str(og.get("content"))).strip()
+        if len(text) < 80:
+            art = soup.find("article") or soup.find("div", class_=lambda c: c and "article" in str(c).lower())
+            if art:
+                text = art.get_text(separator=" ", strip=True)[:max_chars]
+        return text[:max_chars]
     except Exception:
         return ""
 
 
-def entry_fallback_text(entry, max_chars: int = 1800) -> str:
+def entry_fallback_text(entry, max_chars: int = 2200) -> str:
     summary = (getattr(entry, "summary", "") or "").strip()
     title = (getattr(entry, "title", "") or "").strip()
+    # Strip HTML from RSS summary when present
+    if summary and "<" in summary:
+        summary = BeautifulSoup(summary, "html.parser").get_text(separator=" ", strip=True)
     text = summary if len(summary) >= 80 else f"{title}. {summary}".strip(". ").strip()
     return text[:max_chars]
 
 
-def fetch_corpus(state: str, query_extra: str, limit: int = 8) -> list[str]:
-    raw = f"{state} Assembly Election 2026 {query_extra} when:1d {TRUSTED_BLOCK}"
-    safe = urllib.parse.quote(raw)
-    url = f"https://news.google.com/rss/search?q={safe}&hl=en-IN&gl=IN&ceid=IN:en"
-    chunks: list[str] = []
+def _feed_entries(url: str) -> list:
     try:
         feed = feedparser.parse(url)
-        for entry in feed.entries[:limit]:
-            link = getattr(entry, "link", "") or ""
-            text = extract_article_text(link) if link else ""
-            if not text:
-                text = entry_fallback_text(entry)
-            src = getattr(getattr(entry, "source", None), "title", "") or "feed"
-            if text:
-                chunks.append(f"Outlet: {src} | URL: {link} | Text: {text}")
+        if getattr(feed, "bozo", False) and not feed.entries:
+            print(f"      [!] RSS bozo: {getattr(feed, 'bozo_exception', 'unknown')}")
+        return list(feed.entries or [])
     except Exception as e:
-        print(f"      [!] RSS error ({state}): {e}")
-    return chunks
+        print(f"      [!] feedparser: {e}")
+        return []
 
 
-def fetch_eci_corpus(state: str, limit: int = 5) -> list[str]:
-    raw = f'{state} {ECI_BLOCK} when:1d'
-    safe = urllib.parse.quote(raw)
+def fetch_query_chunks(query: str, limit: int, label: str) -> list[str]:
+    safe = urllib.parse.quote(query)
     url = f"https://news.google.com/rss/search?q={safe}&hl=en-IN&gl=IN&ceid=IN:en"
     chunks: list[str] = []
-    try:
-        feed = feedparser.parse(url)
-        for entry in feed.entries[:limit]:
-            link = getattr(entry, "link", "") or ""
-            text = extract_article_text(link) if link else ""
-            if not text:
-                text = entry_fallback_text(entry)
-            if text:
-                chunks.append(f"[ECI-related] URL: {link} | Text: {text}")
-    except Exception:
-        pass
+    seen_urls: set[str] = set()
+    for entry in _feed_entries(url)[:limit]:
+        link = (getattr(entry, "link", "") or "").strip()
+        if not link or link in seen_urls:
+            continue
+        seen_urls.add(link)
+        text = extract_article_text(link) if link else ""
+        if not text or len(text) < 50:
+            text = entry_fallback_text(entry)
+        if not text:
+            continue
+        src = getattr(getattr(entry, "source", None), "title", "") or "feed"
+        chunks.append(f"[{label}] Outlet: {src} | URL: {link} | Text: {text}")
     return chunks
+
+
+def fetch_corpus(state: str, query_extra: str, limit: int = 12) -> list[str]:
+    """Trusted-source query first; broad fallback if Google returns almost nothing."""
+    q_trusted = f"{state} Assembly Election 2026 {query_extra} when:1d {TRUSTED_BLOCK}"
+    chunks = fetch_query_chunks(q_trusted, limit, "trusted")
+    if len(chunks) < 4:
+        q_broad = (
+            f"{state} Assembly election 2026 (turnout OR voting OR polling OR booth OR EVM OR queue OR voters) when:1d"
+        )
+        extra = fetch_query_chunks(q_broad, limit, "broad")
+        seen = {c.split("URL:", 1)[-1].split("|", 1)[0].strip() for c in chunks if "URL:" in c}
+        for c in extra:
+            u = c.split("URL:", 1)[-1].split("|", 1)[0].strip() if "URL:" in c else ""
+            if u and u not in seen:
+                seen.add(u)
+                chunks.append(c)
+    return chunks
+
+
+def fetch_booth_corpus(state: str, limit: int = 10) -> list[str]:
+    """Dedicated pass for booth / station / EVM / queue stories (often missing from generic turnout query)."""
+    q = (
+        f'{state} ( "polling booth" OR "polling station" OR EVM OR re-poll OR queue OR serpentine '
+        f"OR lathi OR clash OR violence OR malfunction ) election 2026 when:1d"
+    )
+    return fetch_query_chunks(q, limit, "booth")
+
+
+def fetch_eci_corpus(state: str, limit: int = 6) -> list[str]:
+    raw = f'{state} {ECI_BLOCK} when:1d'
+    return fetch_query_chunks(raw, limit, "eci")
 
 
 def llm_json(model: str, prompt: str) -> dict:
@@ -170,28 +238,38 @@ def llm_json(model: str, prompt: str) -> dict:
 
 
 def dual_consensus_turnout(state: str, finalize: bool) -> dict | None:
-    """Pass A: extract numeric claims; Pass B: neutral range + incidents + citations."""
-    news = fetch_corpus(state, "(turnout OR voting OR polling OR booth OR EVM)", 8)
-    eci = fetch_eci_corpus(state, 5)
-    corpus = news + eci
+    """Pass A: extract numeric claims + raw incidents; Pass B: neutral range + booth lines + citations."""
+    news = fetch_corpus(state, "(turnout OR voting OR polling OR booth OR EVM OR percent OR percentage)", 12)
+    booth = fetch_booth_corpus(state, 10)
+    eci = fetch_eci_corpus(state, 6)
+    corpus = news + booth + eci
     if not corpus:
-        print(f"      [!] No corpus for {state}")
+        print(f"      [!] No corpus for {state} (check network / Google News RSS)")
         return None
     joined = "\n---\n".join(corpus)
+    max_in = 14_000
+    if len(joined) > max_in:
+        joined = joined[:max_in] + "\n...[truncated]"
 
     extract_prompt = f"""
-You are extracting ONLY factual numeric claims about voter TURNOUT PERCENTAGE for {state} (Assembly 2026).
-From the text, list each distinct percentage mentioned and which outlet/URL implied it.
-If none, return empty arrays.
+You are extracting factual claims for {state} Assembly Election 2026 (India), from news text only.
+
+1) Numeric TURNOUT: each distinct percentage (or range like 65-70) explicitly tied to {state} voting today / phase.
+2) BOOTH / FIELD REPORTS: queues, EVM swap, re-poll ordered, violence, long lines, notable incidents — even WITHOUT a turnout number.
+   Include approximate location or AC name if stated.
 
 Return pure JSON (no markdown):
 {{
   "claims": [{{"turnout_pct": 68.2, "context": "short phrase", "url": "https://..."}}],
-  "booth_incidents_raw": [{{"text": "short", "url": "https://..."}}]
+  "booth_incidents_raw": [{{"text": "short factual line", "url": "https://..."}}]
 }}
 
+Rules:
+- turnout_pct must be a number (use midpoint if a range like 65-70 is given).
+- If no numeric turnout appears, claims may be empty but booth_incidents_raw should still list notable booth/polling items from the text.
+
 TEXT:
-{joined[:12000]}
+{joined}
 """
     try:
         extracted = llm_json("gemini-2.5-flash", extract_prompt)
@@ -206,13 +284,17 @@ TEXT:
     consensus_prompt = f"""
 You are a neutral election analyst. {finalize_note}
 Given extracted claims (not raw articles), produce:
-- turnout_min / turnout_max (inclusive %), 0 if truly unknown
+- turnout_min / turnout_max (inclusive %). Use 0 only if no numeric turnout evidence exists.
 - confidence_0_1
 - one sentence methodology_note (no outlet names in the note)
-- booth_news: up to 3 items {{text, source}} for significant booth/EVM incidents (use URLs from evidence)
-- citations: up to 5 items {{outlet, url}} supporting the range
+- booth_news: up to 6 items {{text, source}} — include:
+  * significant booth/EVM/queue/violence lines (source = URL when available)
+  * short paraphrases from booth_incidents_raw
+- citations: up to 5 items {{outlet, url}} supporting the turnout range (if any)
 
-Rules: Do not invent percentages. If claims conflict, reflect that in a wider range.
+Rules:
+- Do not invent percentages. If no numeric turnout, set turnout_min and turnout_max to 0 but still fill booth_news from incidents.
+- If claims conflict, use a wider range and lower confidence.
 
 EXTRACTED_CLAIMS_JSON:
 {claims}
@@ -236,7 +318,6 @@ Return pure JSON (no markdown):
         print(f"      [!] Consensus LLM failed {state}: {e}")
         return None
 
-    # Merge citations into booth_news for UI (type=citation) without schema migration
     booth = list(out.get("booth_news") or [])
     for c in (out.get("citations") or [])[:5]:
         url = c.get("url") or ""
@@ -245,12 +326,12 @@ Return pure JSON (no markdown):
             booth.append({"text": f"Source track: {outlet}", "source": url, "type": "citation"})
     note = out.get("methodology_note") or ""
     if note:
-        booth.append({"text": note[:220], "source": "", "type": "methodology"})
+        booth.append({"text": note[:280], "source": "", "type": "methodology"})
     out["booth_news"] = booth
     return out
 
 
-def insert_turnout_row(state: str, data: dict, time_slot: str) -> None:
+def upsert_turnout_row(state: str, data: dict, time_slot: str) -> None:
     if not supabase:
         return
     row = {
@@ -260,22 +341,49 @@ def insert_turnout_row(state: str, data: dict, time_slot: str) -> None:
         "turnout_max": float(data.get("turnout_max") or 0),
         "booth_news": data.get("booth_news") or [],
     }
-    supabase.table("voter_turnout").insert(row).execute()
+    try:
+        prev = (
+            supabase.table("voter_turnout")
+            .select("id,updated_at")
+            .eq("state", state)
+            .order("updated_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        now_utc = datetime.now(timezone.utc)
+        if prev.data:
+            last = parse_supabase_ts(str(prev.data[0].get("updated_at") or ""))
+            age_sec = (now_utc - last).total_seconds()
+            # Refresh same row during active ops window (avoids dozens of orphan rows; keeps UI "current").
+            if age_sec < 72 * 3600:
+                rid = prev.data[0]["id"]
+                row["updated_at"] = now_utc.isoformat()
+                up = supabase.table("voter_turnout").update(row).eq("id", rid).execute()
+                if getattr(up, "error", None):
+                    print(f"      [!] Supabase update error: {up.error}")
+                return
+        ins = supabase.table("voter_turnout").insert(row).execute()
+        if getattr(ins, "error", None):
+            print(f"      [!] Supabase insert error: {ins.error}")
+    except Exception as e:
+        print(f"      [!] Supabase upsert failed: {e}")
 
 
 def ingest_turnout_for_states(states: list[str], finalize: bool) -> None:
-    slot = "FINAL" if finalize else ist_now().strftime("%I:%M %p").lstrip("0")
+    now = ist_now()
+    slot = format_time_slot_ist(now, finalize=finalize)
     label = "FINAL TURNOUT PASS" if finalize else "LIVE TURNOUT"
-    print(f"\n[+] {label} — {', '.join(states)}")
+    print(f"\n[+] {label} — {', '.join(states)} | slot={slot}")
     for state in states:
         try:
             data = dual_consensus_turnout(state, finalize=finalize)
             if not data:
                 continue
-            insert_turnout_row(state, data, f"{slot} IST")
+            upsert_turnout_row(state, data, slot)
             lo = data.get("turnout_min")
             hi = data.get("turnout_max")
-            print(f"   -> [OK] {state}  {lo}%–{hi}%  (conf {data.get('confidence_0_1')})")
+            bn = len(data.get("booth_news") or [])
+            print(f"   -> [OK] {state}  {lo}%–{hi}%  (conf {data.get('confidence_0_1')})  booth_items={bn}")
         except Exception as e:
             print(f"   -> [ERR] {state}: {e}")
 
@@ -291,15 +399,18 @@ def ingest_exit_polls(states: list[str]) -> None:
         url = f"https://news.google.com/rss/search?q={safe}&hl=en-IN&gl=IN&ceid=IN:en"
         corpus: list[str] = []
         try:
-            feed = feedparser.parse(url)
-            for entry in feed.entries[:6]:
-                text = extract_article_text(getattr(entry, "link", "") or "")
+            for entry in _feed_entries(url)[:8]:
+                link = getattr(entry, "link", "") or ""
+                text = extract_article_text(link) if link else ""
+                if not text or len(text) < 50:
+                    text = entry_fallback_text(entry)
                 if text:
-                    corpus.append(f"URL: {entry.link} | Text: {text}")
+                    corpus.append(f"URL: {link} | Text: {text}")
         except Exception as e:
             print(f"   -> [ERR] RSS {state}: {e}")
             continue
         if not corpus:
+            print(f"   -> [SKIP] {state}: no exit-poll corpus")
             continue
         prompt = f"""
 Neutral extraction of exit-poll seat bands for {state} Assembly 2026.
@@ -326,27 +437,41 @@ TEXT:
             print(f"   -> [SKIP] {state}: no agency identified")
             continue
         if supabase:
-            supabase.table("exit_polls").insert(
-                {
-                    "state": state,
-                    "agency": agency,
-                    "party_a_name": data.get("party_a_name"),
-                    "party_a_min": int(data.get("party_a_min") or 0),
-                    "party_a_max": int(data.get("party_a_max") or 0),
-                    "party_b_name": data.get("party_b_name"),
-                    "party_b_min": int(data.get("party_b_min") or 0),
-                    "party_b_max": int(data.get("party_b_max") or 0),
-                }
-            ).execute()
+            try:
+                supabase.table("exit_polls").insert(
+                    {
+                        "state": state,
+                        "agency": agency,
+                        "party_a_name": data.get("party_a_name"),
+                        "party_a_min": int(data.get("party_a_min") or 0),
+                        "party_a_max": int(data.get("party_a_max") or 0),
+                        "party_b_name": data.get("party_b_name"),
+                        "party_b_min": int(data.get("party_b_min") or 0),
+                        "party_b_max": int(data.get("party_b_max") or 0),
+                    }
+                ).execute()
+            except Exception as e:
+                print(f"   -> [ERR] exit_poll insert {state}: {e}")
         print(f"   -> [OK] {state} — {agency}")
 
 
-def one_cycle(*, force_states: list[str] | None) -> None:
+def sleep_after_cycle_seconds(mode: str) -> int:
+    """Shorter interval during live turnout so the UI does not look frozen."""
+    if mode == "TURNOUT_LIVE":
+        return int(os.getenv("VOTING_INGEST_INTERVAL_SEC", "600"))  # 10 min default
+    if mode == "TURNOUT_FINAL":
+        return 300
+    if mode == "EXIT_POLL":
+        return 1200
+    return 3600
+
+
+def one_cycle(*, force_states: list[str] | None) -> str:
     now = ist_now()
     states = force_states if force_states else states_for_calendar(now.date())
     if not states:
         print(f"[i] No polling schedule for {now.date()} — idle.")
-        return
+        return "IDLE"
 
     mode = run_mode(now)
     if force_states:
@@ -355,14 +480,15 @@ def one_cycle(*, force_states: list[str] | None) -> None:
     print(f"[i] IST {now.strftime('%Y-%m-%d %H:%M')} | mode={mode} | states={states}")
 
     if mode == "IDLE":
-        return
+        return mode
     if mode == "EXIT_POLL":
         ingest_exit_polls(states)
-        return
+        return mode
     if mode == "TURNOUT_FINAL":
         ingest_turnout_for_states(states, finalize=True)
-        return
+        return mode
     ingest_turnout_for_states(states, finalize=False)
+    return mode
 
 
 def main() -> None:
@@ -391,13 +517,14 @@ def main() -> None:
                 print(f"[i] No poll today ({now.date()} IST) — sleep 1h")
                 time.sleep(3600)
                 continue
-            one_cycle(force_states=force_states)
+            mode = one_cycle(force_states=force_states)
+            time.sleep(sleep_after_cycle_seconds(mode))
         except KeyboardInterrupt:
             print("Stopped.")
             break
         except Exception as e:
             print(f"[!!] cycle error: {e}")
-        time.sleep(1800)
+            time.sleep(300)
 
 
 if __name__ == "__main__":
