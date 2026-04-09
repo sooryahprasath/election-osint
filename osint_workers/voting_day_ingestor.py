@@ -264,6 +264,72 @@ def _feed_entries(url: str) -> list:
         return []
 
 
+def states_or_rss_group(states: list[str]) -> str:
+    """Build (State1 OR "State Two" OR ...) for Google News RSS q=."""
+    parts: list[str] = []
+    for s in states:
+        s = (s or "").strip()
+        if not s:
+            continue
+        if " " in s:
+            parts.append(f'"{s}"')
+        else:
+            parts.append(s)
+    return "(" + " OR ".join(parts) + ")"
+
+
+def dedupe_corpus_chunks(chunks: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for c in chunks:
+        u = ""
+        if "URL:" in c:
+            try:
+                u = c.split("URL:", 1)[1].split("|", 1)[0].strip()
+            except IndexError:
+                u = ""
+        key = u or c[:160]
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(c)
+    return out
+
+
+def fetch_shared_turnout_headlines(states: list[str], limit_each: int = 14) -> list[str]:
+    """
+    Broad RSS queries aligned with Google News web searches like
+    voter turnout / voter turnout 2026 (see news.google.com search for India).
+    Fetched once per cycle and merged into each state's LLM context.
+    """
+    if not states:
+        return []
+    ors = states_or_rss_group(states)
+    queries = [
+        f"voter turnout {ors} when:1d",
+        f"voter turnout 2026 {ors} when:1d",
+        f"Assembly elections 2026 LIVE turnout {ors} when:1d",
+        f'{ors} ("voter turnout" OR "polling percentage" OR "percent turnout" OR turnout) election 2026 when:1d',
+        f'India election 2026 {ors} (turnout OR polling OR percent) when:1d',
+    ]
+    chunks: list[str] = []
+    seen: set[str] = set()
+    for q in queries:
+        for ch in fetch_query_chunks(q, limit_each, "headlines"):
+            u = ""
+            if "URL:" in ch:
+                try:
+                    u = ch.split("URL:", 1)[1].split("|", 1)[0].strip()
+                except IndexError:
+                    u = ""
+            key = u or ch[:220]
+            if key in seen:
+                continue
+            seen.add(key)
+            chunks.append(ch)
+    return chunks
+
+
 def fetch_query_chunks(query: str, limit: int, label: str) -> list[str]:
     safe = urllib.parse.quote(query)
     url = f"https://news.google.com/rss/search?q={safe}&hl=en-IN&gl=IN&ceid=IN:en"
@@ -335,26 +401,37 @@ def llm_json(model: str, prompt: str) -> dict:
     return json.loads(text)
 
 
-def dual_consensus_turnout(state: str, finalize: bool) -> dict | None:
+def dual_consensus_turnout(state: str, finalize: bool, shared_chunks: list[str] | None = None) -> dict | None:
     """Pass A: extract numeric claims + raw incidents; Pass B: neutral range + booth lines + citations."""
+    shared = list(shared_chunks or [])
+    # State-scoped wire (same intent as Google News "voter turnout 2026" + state)
+    st_q = f'"{state}"' if " " in state else state
+    state_wire = fetch_query_chunks(
+        f"{st_q} (voter turnout OR turnout percent OR polling percentage) 2026 when:1d",
+        12,
+        "state_wire",
+    )
     news = fetch_corpus(state, "(turnout OR voting OR polling OR booth OR EVM OR percent OR percentage)", 12)
     booth = fetch_booth_corpus(state, 10)
     eci = fetch_eci_corpus(state, 6)
-    corpus = news + booth + eci
+    corpus = dedupe_corpus_chunks(shared + state_wire + news + booth + eci)
     if not corpus:
         print(f"      [!] No corpus for {state} (check network / Google News RSS)")
         return None
     joined = "\n---\n".join(corpus)
-    max_in = 14_000
+    max_in = 18_000
     if len(joined) > max_in:
         joined = joined[:max_in] + "\n...[truncated]"
 
     extract_prompt = f"""
 You are extracting factual claims for {state} Assembly Election 2026 (India), from news text only.
 
-1) Numeric TURNOUT: each distinct percentage (or range like 65-70) explicitly tied to {state} voting today / phase.
-2) BOOTH / FIELD REPORTS: queues, EVM swap, re-poll ordered, violence, long lines, notable incidents — even WITHOUT a turnout number.
-   Include approximate location or AC name if stated.
+The TEXT includes [headlines] RSS items (broad "voter turnout" style wires) plus state-specific clips. It may mention several states in one article.
+
+1) Numeric TURNOUT for {state} ONLY: every distinct percentage (or range) that clearly refers to {state}
+   (including time-slice figures like "4.4% till 9am", "12% in first two hours", district-wise % if tied to {state}).
+   Do NOT attach another state's figure to {state}.
+2) BOOTH / FIELD REPORTS for {state} ONLY: queues, EVM swap, re-poll, violence, long lines — even without a turnout number.
 
 Return pure JSON (no markdown):
 {{
@@ -364,7 +441,8 @@ Return pure JSON (no markdown):
 
 Rules:
 - turnout_pct must be a number (use midpoint if a range like 65-70 is given).
-- If no numeric turnout appears, claims may be empty but booth_incidents_raw should still list notable booth/polling items from the text.
+- If no numeric turnout for {state}, claims may be empty; still list booth_incidents_raw for {state} when present.
+- Use the URL from the same snippet as each claim/incident when available.
 
 TEXT:
 {joined}
@@ -472,9 +550,11 @@ def ingest_turnout_for_states(states: list[str], finalize: bool) -> None:
     slot = format_time_slot_ist(now, finalize=finalize)
     label = "FINAL TURNOUT PASS" if finalize else "LIVE TURNOUT"
     print(f"\n[+] {label} — {', '.join(states)} | slot={slot}")
+    shared = fetch_shared_turnout_headlines(states)
+    print(f"   [i] Shared turnout headline RSS chunks: {len(shared)} (voter turnout / 2026 / LIVE wires)")
     for state in states:
         try:
-            data = dual_consensus_turnout(state, finalize=finalize)
+            data = dual_consensus_turnout(state, finalize=finalize, shared_chunks=shared)
             if not data:
                 continue
             upsert_turnout_row(state, data, slot)
