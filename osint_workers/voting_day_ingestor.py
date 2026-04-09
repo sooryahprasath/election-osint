@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 import urllib.parse
@@ -238,6 +239,104 @@ def resolve_publisher_url(raw: str, timeout: float = 12.0) -> str:
         return final
     except Exception:
         return raw
+
+
+def prune_booth_news_items(items: list) -> list[dict]:
+    """Drop empty / ellipsis-only rows and useless 'Source track: Source' lines."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        d = dict(it)
+        text = str(d.get("text") or "").strip()
+        src = str(d.get("source") or "").strip()
+        typ = str(d.get("type") or "")
+        if text.lower() in ("source track: source", "source track:"):
+            text = ""
+        if re.match(r"^source track:\s*source\s*$", text, re.I):
+            text = ""
+        if not text and src.startswith("http"):
+            text = "Press report"
+        if text in (".", "...", "…", "-", "—", "–"):
+            if not src.startswith("http"):
+                continue
+            text = "See article"
+        if len(text) < 2:
+            if not src.startswith("http"):
+                continue
+            text = "See article"
+        if typ == "methodology" and len(text) < 12:
+            continue
+        key = f"{text[:120]}|{src[:100]}"
+        if key in seen:
+            continue
+        seen.add(key)
+        d["text"] = text
+        if src:
+            d["source"] = src
+        out.append(d)
+    return out
+
+
+def booth_lines_from_extract_claims(extracted: dict) -> list[dict]:
+    """Turn extract-phase percentage claims into visible booth lines with URLs."""
+    lines: list[dict] = []
+    seen: set[str] = set()
+    for c in extracted.get("claims") or []:
+        if not isinstance(c, dict):
+            continue
+        url = str(c.get("url") or "").strip()
+        ctx = str(c.get("context") or "").strip()
+        try:
+            p = float(c.get("turnout_pct"))
+        except (TypeError, ValueError):
+            continue
+        if not (0 < p <= 100):
+            continue
+        text = ctx if len(ctx) >= 8 else f"Wire: ~{p:g}% turnout cited for this phase."
+        key = url or text
+        if key in seen:
+            continue
+        seen.add(key)
+        lines.append({"text": text[:280], "source": url, "type": "turnout_claim"})
+    return lines[:8]
+
+
+def apply_extract_turnout_fallback(extracted: dict, out: dict) -> None:
+    """If consensus returned 0–0 but extract found numbers, derive a conservative band."""
+    try:
+        lo = float(out.get("turnout_min") or 0)
+        hi = float(out.get("turnout_max") or 0)
+    except (TypeError, ValueError):
+        lo, hi = 0.0, 0.0
+    if lo > 0 or hi > 0:
+        return
+    nums: list[float] = []
+    for c in extracted.get("claims") or []:
+        if not isinstance(c, dict):
+            continue
+        try:
+            p = float(c.get("turnout_pct"))
+            if 0 < p <= 100:
+                nums.append(p)
+        except (TypeError, ValueError):
+            pass
+    if not nums:
+        return
+    a, b = min(nums), max(nums)
+    if b - a <= 12:
+        mid = (a + b) / 2
+        out["turnout_min"] = round(max(0.0, mid - 4), 1)
+        out["turnout_max"] = round(min(100.0, mid + 4), 1)
+    else:
+        out["turnout_min"] = round(a, 1)
+        out["turnout_max"] = round(b, 1)
+    try:
+        conf = float(out.get("confidence_0_1") or 0.45)
+    except (TypeError, ValueError):
+        conf = 0.45
+    out["confidence_0_1"] = min(0.9, conf + 0.08)
 
 
 def sanitize_booth_news_urls(items: list) -> list[dict]:
@@ -463,14 +562,15 @@ Given extracted claims (not raw articles), produce:
 - turnout_min / turnout_max (inclusive %). Use 0 only if no numeric turnout evidence exists.
 - confidence_0_1
 - one sentence methodology_note (no outlet names in the note)
-- booth_news: up to 6 items {{text, source}} — include:
-  * significant booth/EVM/queue/violence lines; source = the publisher article URL copied exactly from the "URL: ..." field in TEXT (never use news.google.com links)
-  * short paraphrases from booth_incidents_raw
-- citations: up to 5 items {{outlet, url}} supporting the turnout range (if any)
+- booth_news: up to 6 items {{text, source}} — every item MUST have text with at least 12 characters (no empty strings, no "...").
+  * significant booth/EVM/queue/violence lines; source = publisher URL from "URL: ..." in TEXT (not news.google.com)
+  * paraphrases from booth_incidents_raw
+- citations: up to 5 items {{outlet, url}} — outlet MUST be the real news brand (e.g. India TV, ANI), never the word "Source" alone
 
 Rules:
-- Do not invent percentages. If no numeric turnout, set turnout_min and turnout_max to 0 but still fill booth_news from incidents.
+- Do not invent percentages. If no numeric turnout, set turnout_min and turnout_max to 0 but still fill booth_news from incidents when present.
 - If claims conflict, use a wider range and lower confidence.
+- Omit a citation entirely if you do not know the outlet name.
 
 EXTRACTED_CLAIMS_JSON:
 {claims}
@@ -495,14 +595,35 @@ Return pure JSON (no markdown):
         return None
 
     booth = list(out.get("booth_news") or [])
+    # Visible lines from extract (wires often have % in pass A but consensus leaves booth empty)
+    claim_lines = booth_lines_from_extract_claims(extracted)
+    booth = claim_lines + booth
+    apply_extract_turnout_fallback(extracted, out)
+    booth = prune_booth_news_items(booth)
+
     for c in (out.get("citations") or [])[:5]:
-        url = c.get("url") or ""
-        outlet = c.get("outlet") or "Source"
-        if url:
-            booth.append({"text": f"Source track: {outlet}", "source": url, "type": "citation"})
-    note = out.get("methodology_note") or ""
-    if note:
-        booth.append({"text": note[:280], "source": "", "type": "methodology"})
+        if not isinstance(c, dict):
+            continue
+        url = str(c.get("url") or "").strip()
+        outlet = str(c.get("outlet") or "").strip()
+        if not url:
+            continue
+        if len(outlet) < 2 or outlet.lower() in ("source", "unknown", "news", "media"):
+            label = "Press report"
+        else:
+            label = f"{outlet} — turnout sourcing"
+        booth.append({"text": label, "source": url, "type": "citation"})
+
+    note = str(out.get("methodology_note") or "").strip()
+    if len(note) >= 20:
+        boiler = re.match(
+            r"^no (numeric|specific).*turnout.*(claims|reports|provided|available)",
+            note,
+            re.I,
+        )
+        if not (boiler and len(booth) > 0):
+            booth.append({"text": note[:280], "source": "", "type": "methodology"})
+    booth = prune_booth_news_items(booth)
     out["booth_news"] = sanitize_booth_news_urls(booth)
     return out
 

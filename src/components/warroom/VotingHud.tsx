@@ -35,6 +35,25 @@ function formatRelativeUpdated(updatedAt: unknown): string {
   return `${h}h ago`;
 }
 
+function filterRenderableBoothNews(raw: unknown): Record<string, unknown>[] {
+  const list = Array.isArray(raw) ? raw : [];
+  return list.filter((n) => {
+    if (!n || typeof n !== "object") return false;
+    const o = n as Record<string, unknown>;
+    const text = String(o.text ?? "").trim();
+    const src = String(o.source ?? "").trim();
+    const typ = String(o.type ?? "");
+    if (typ === "methodology" && text.length < 24) return false;
+    if (/^source track:\s*source\s*$/i.test(text)) return false;
+    if (text === "..." || text === "…" || text === "." || text === "—" || text === "–") return src.startsWith("http");
+    if (text.length >= 14) return true;
+    if (typ === "turnout_claim" && text.length >= 8) return true;
+    if (src.startsWith("http") && text.length >= 4) return true;
+    if (text.length < 4) return false;
+    return text.length >= 8;
+  }) as Record<string, unknown>[];
+}
+
 export default function VotingHud({
   isMobileOpen,
   onCloseMobile,
@@ -423,7 +442,7 @@ export default function VotingHud({
                       const flat: { st: string; n: any }[] = [];
                       for (const st of states) {
                         const row = latestTurnoutByState.get(st);
-                        const bullets = row?.booth_news || [];
+                        const bullets = filterRenderableBoothNews(row?.booth_news);
                         for (const n of bullets) flat.push({ st, n });
                       }
                       const pick = flat.slice(0, 2);
@@ -451,7 +470,7 @@ export default function VotingHud({
                 <div className="mt-3 grid gap-2">
                   {(notesState === "ALL" ? activeStates : [notesState]).map((st) => {
                     const row = latestTurnoutByState.get(st);
-                    const bullets = row?.booth_news || [];
+                    const bullets = filterRenderableBoothNews(row?.booth_news);
                     return (
                       <div key={st} className="rounded-lg border border-[color:var(--border)] bg-[var(--surface-2)] px-3 py-2">
                         <div className="flex items-center justify-between">
@@ -500,6 +519,10 @@ export default function VotingHud({
                                 </div>
                               );
                             })}
+                          </div>
+                        ) : row ? (
+                          <div className="mt-2 text-[11px] text-[var(--text-muted)] italic">
+                            No readable notes after last sync — tap REFRESH or wait for the worker.
                           </div>
                         ) : (
                           <div className="mt-2 text-[11px] text-[var(--text-muted)] italic">Awaiting first ingest cycle…</div>
