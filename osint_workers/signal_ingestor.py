@@ -98,6 +98,7 @@ GDELT_QUERIES = {
 IST = timezone(timedelta(hours=5, minutes=30))
 YOUTUBE_QUOTA_USED = 0
 LAST_QUOTA_RESET_DATE = datetime.now(IST).date()
+SIGNAL_RETENTION_DAYS = 14
 
 def manage_youtube_quota():
     """Resets quota daily at midnight IST."""
@@ -510,13 +511,13 @@ def generate_ai_briefing():
     except Exception as e: print(f"   ->[Briefing Error]: {e}")
 
 def cleanup_old_signals():
-    """NEW: Deletes signals older than 24 hours to keep the Map and DB extremely clean."""
+    """Deletes signals older than the retention window so multi-day trends remain available."""
     if not supabase: return
     try:
-        twenty_four_hrs_ago = (datetime.now(IST) - timedelta(hours=24)).isoformat()
-        res = supabase.table("signals").delete().lt("created_at", twenty_four_hrs_ago).execute()
+        cutoff = (datetime.now(IST) - timedelta(days=SIGNAL_RETENTION_DAYS)).isoformat()
+        res = supabase.table("signals").delete().lt("created_at", cutoff).execute()
         deleted_count = len(res.data) if res.data else 0
-        print(f"[+] Garbage Collection: Cleared {deleted_count} expired signals from the map.")
+        print(f"[+] Garbage Collection: Cleared {deleted_count} signals older than {SIGNAL_RETENTION_DAYS} days.")
     except Exception as e:
         print(f"   ->[Cleanup Error]: {e}")
 

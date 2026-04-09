@@ -25,6 +25,19 @@ export type Constituency = {
   turnout_percentage?: number
 }
 
+export type HistoricalResult = {
+  id: string
+  constituency_id: string
+  election_year?: number
+  winner_candidate_name?: string
+  winner_party?: string
+  runner_up_candidate_name?: string
+  runner_up_party?: string
+  margin_votes?: number
+  margin_pct?: number
+  turnout_pct?: number
+}
+
 export type Signal = {
   id: string
   source: string
@@ -55,6 +68,19 @@ export const DB_SCHEMA = `
     status TEXT DEFAULT 'pending',
     leading_candidate_id TEXT,
     turnout_percentage FLOAT
+  );
+
+  CREATE TABLE historical_results (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    constituency_id TEXT REFERENCES constituencies(id),
+    election_year INTEGER,
+    winner_candidate_name TEXT,
+    winner_party TEXT,
+    runner_up_candidate_name TEXT,
+    runner_up_party TEXT,
+    margin_votes INTEGER,
+    margin_pct FLOAT,
+    turnout_pct FLOAT
   );
 
   CREATE TABLE candidates (

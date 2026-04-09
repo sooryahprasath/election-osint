@@ -10,6 +10,7 @@
 -- Drop existing tables to ensure a clean deployment in sandbox environments
 DROP TABLE IF EXISTS briefings CASCADE;
 DROP TABLE IF EXISTS exit_polls CASCADE;
+DROP TABLE IF EXISTS historical_results CASCADE;
 DROP TABLE IF EXISTS live_results CASCADE;
 DROP TABLE IF EXISTS signals CASCADE;
 DROP TABLE IF EXISTS voter_turnout CASCADE;
@@ -37,6 +38,21 @@ CREATE TABLE constituencies (
     district TEXT,
     reservation TEXT,
     electorate INTEGER,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
+);
+
+-- 1B. Historical constituency results (previous assembly cycle baseline)
+CREATE TABLE historical_results (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    constituency_id TEXT REFERENCES constituencies(id),
+    election_year INTEGER,
+    winner_candidate_name TEXT,
+    winner_party TEXT,
+    runner_up_candidate_name TEXT,
+    runner_up_party TEXT,
+    margin_votes INTEGER,
+    margin_pct REAL,
+    turnout_pct REAL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
 );
 
@@ -187,9 +203,12 @@ comment on column public.constituencies.volatility_updated_at is
 create index if not exists idx_candidates_constituency_id on public.candidates (constituency_id);
 create index if not exists idx_candidates_removed on public.candidates (removed);
 create index if not exists idx_candidates_myneta_candidate_id on public.candidates (myneta_candidate_id);
+create index if not exists idx_historical_results_constituency_id on public.historical_results (constituency_id);
+create index if not exists idx_historical_results_election_year on public.historical_results (election_year desc);
 
 -- ── Row level security (anon = read-only; service role bypasses RLS) ──
 alter table public.constituencies enable row level security;
+alter table public.historical_results enable row level security;
 alter table public.candidates enable row level security;
 alter table public.signals enable row level security;
 alter table public.social_signals enable row level security;
@@ -199,6 +218,7 @@ alter table public.exit_polls enable row level security;
 alter table public.live_results enable row level security;
 
 revoke all on table public.constituencies from anon, authenticated;
+revoke all on table public.historical_results from anon, authenticated;
 revoke all on table public.candidates from anon, authenticated;
 revoke all on table public.signals from anon, authenticated;
 revoke all on table public.social_signals from anon, authenticated;
@@ -208,6 +228,7 @@ revoke all on table public.exit_polls from anon, authenticated;
 revoke all on table public.live_results from anon, authenticated;
 
 grant select on table public.constituencies to anon, authenticated;
+grant select on table public.historical_results to anon, authenticated;
 grant select on table public.candidates to anon, authenticated;
 grant select on table public.signals to anon, authenticated;
 grant select on table public.social_signals to anon, authenticated;
@@ -217,6 +238,7 @@ grant select on table public.exit_polls to anon, authenticated;
 grant select on table public.live_results to anon, authenticated;
 
 drop policy if exists "public_read_constituencies" on public.constituencies;
+drop policy if exists "public_read_historical_results" on public.historical_results;
 drop policy if exists "public_read_candidates" on public.candidates;
 drop policy if exists "public_read_signals" on public.signals;
 drop policy if exists "public_read_social_signals" on public.social_signals;
@@ -226,6 +248,7 @@ drop policy if exists "public_read_exit_polls" on public.exit_polls;
 drop policy if exists "public_read_live_results" on public.live_results;
 
 create policy "public_read_constituencies" on public.constituencies for select using (true);
+create policy "public_read_historical_results" on public.historical_results for select using (true);
 create policy "public_read_candidates" on public.candidates for select using (true);
 create policy "public_read_signals" on public.signals for select using (true);
 create policy "public_read_social_signals" on public.social_signals for select using (true);
