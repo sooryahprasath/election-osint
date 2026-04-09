@@ -4,6 +4,7 @@ import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from "re
 import { ComposableMap, Geographies, Geography, Marker, ZoomableGroup } from "react-simple-maps";
 import { geoMercator, geoPath } from "d3-geo";
 import { useLiveData } from "@/lib/context/LiveDataContext";
+import { isVotingLiveWarRoomMode } from "@/lib/config/operationMode";
 import { AlertTriangle, Layers } from "lucide-react";
 import { STATE_META } from "@/lib/utils/states";
 import { excludeFromIntelligenceFeed } from "@/lib/utils/signalClassifier";
@@ -177,7 +178,7 @@ export default function IndiaMap({
     onZoomChangeRef.current = onZoomChange;
   }, [onZoomChange]);
 
-  const isVotingDay = operationMode === "VOTING_DAY";
+  const isVotingDay = isVotingLiveWarRoomMode(operationMode);
   const isCountingDay = operationMode === "COUNTING_DAY";
   const indiaMinZoom = isMobile ? 0.9 : 0.72;
   const indiaDefaultZoom = useMemo(() => {
@@ -560,9 +561,9 @@ export default function IndiaMap({
       >
         <div className="rounded-md border border-[color:var(--border)] bg-[var(--surface-1)]/85 px-2 py-1 shadow-sm backdrop-blur-sm">
           <div className="mb-0.5 font-mono text-[7px] font-bold tracking-wider text-[var(--text-muted)]">LEGEND</div>
-          {operationMode === "VOTING_DAY" ? (
+          {isVotingDay ? (
             <p className="font-mono text-[7px] leading-snug text-[var(--text-secondary)] md:text-[8px]">Dots = turnout (low→high).</p>
-          ) : operationMode === "COUNTING_DAY" ? (
+          ) : isCountingDay ? (
             <p className="font-mono text-[7px] leading-snug text-[var(--text-secondary)] md:text-[8px]">Dots = leading party.</p>
           ) : (
             <p className="font-mono text-[7px] leading-snug text-[var(--text-secondary)] md:text-[8px]">
