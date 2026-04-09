@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 import urllib.parse
@@ -240,6 +241,104 @@ def resolve_publisher_url(raw: str, timeout: float = 12.0) -> str:
         return raw
 
 
+def prune_booth_news_items(items: list) -> list[dict]:
+    """Drop empty / ellipsis-only rows and useless 'Source track: Source' lines."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        d = dict(it)
+        text = str(d.get("text") or "").strip()
+        src = str(d.get("source") or "").strip()
+        typ = str(d.get("type") or "")
+        if text.lower() in ("source track: source", "source track:"):
+            text = ""
+        if re.match(r"^source track:\s*source\s*$", text, re.I):
+            text = ""
+        if not text and src.startswith("http"):
+            text = "Press report"
+        if text in (".", "...", "…", "-", "—", "–"):
+            if not src.startswith("http"):
+                continue
+            text = "See article"
+        if len(text) < 2:
+            if not src.startswith("http"):
+                continue
+            text = "See article"
+        if typ == "methodology" and len(text) < 12:
+            continue
+        key = f"{text[:120]}|{src[:100]}"
+        if key in seen:
+            continue
+        seen.add(key)
+        d["text"] = text
+        if src:
+            d["source"] = src
+        out.append(d)
+    return out
+
+
+def booth_lines_from_extract_claims(extracted: dict) -> list[dict]:
+    """Turn extract-phase percentage claims into visible booth lines with URLs."""
+    lines: list[dict] = []
+    seen: set[str] = set()
+    for c in extracted.get("claims") or []:
+        if not isinstance(c, dict):
+            continue
+        url = str(c.get("url") or "").strip()
+        ctx = str(c.get("context") or "").strip()
+        try:
+            p = float(c.get("turnout_pct"))
+        except (TypeError, ValueError):
+            continue
+        if not (0 < p <= 100):
+            continue
+        text = ctx if len(ctx) >= 8 else f"Wire: ~{p:g}% turnout cited for this phase."
+        key = url or text
+        if key in seen:
+            continue
+        seen.add(key)
+        lines.append({"text": text[:280], "source": url, "type": "turnout_claim"})
+    return lines[:8]
+
+
+def apply_extract_turnout_fallback(extracted: dict, out: dict) -> None:
+    """If consensus returned 0–0 but extract found numbers, derive a conservative band."""
+    try:
+        lo = float(out.get("turnout_min") or 0)
+        hi = float(out.get("turnout_max") or 0)
+    except (TypeError, ValueError):
+        lo, hi = 0.0, 0.0
+    if lo > 0 or hi > 0:
+        return
+    nums: list[float] = []
+    for c in extracted.get("claims") or []:
+        if not isinstance(c, dict):
+            continue
+        try:
+            p = float(c.get("turnout_pct"))
+            if 0 < p <= 100:
+                nums.append(p)
+        except (TypeError, ValueError):
+            pass
+    if not nums:
+        return
+    a, b = min(nums), max(nums)
+    if b - a <= 12:
+        mid = (a + b) / 2
+        out["turnout_min"] = round(max(0.0, mid - 4), 1)
+        out["turnout_max"] = round(min(100.0, mid + 4), 1)
+    else:
+        out["turnout_min"] = round(a, 1)
+        out["turnout_max"] = round(b, 1)
+    try:
+        conf = float(out.get("confidence_0_1") or 0.45)
+    except (TypeError, ValueError):
+        conf = 0.45
+    out["confidence_0_1"] = min(0.9, conf + 0.08)
+
+
 def sanitize_booth_news_urls(items: list) -> list[dict]:
     out: list[dict] = []
     for it in items:
@@ -262,6 +361,72 @@ def _feed_entries(url: str) -> list:
     except Exception as e:
         print(f"      [!] feedparser: {e}")
         return []
+
+
+def states_or_rss_group(states: list[str]) -> str:
+    """Build (State1 OR "State Two" OR ...) for Google News RSS q=."""
+    parts: list[str] = []
+    for s in states:
+        s = (s or "").strip()
+        if not s:
+            continue
+        if " " in s:
+            parts.append(f'"{s}"')
+        else:
+            parts.append(s)
+    return "(" + " OR ".join(parts) + ")"
+
+
+def dedupe_corpus_chunks(chunks: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for c in chunks:
+        u = ""
+        if "URL:" in c:
+            try:
+                u = c.split("URL:", 1)[1].split("|", 1)[0].strip()
+            except IndexError:
+                u = ""
+        key = u or c[:160]
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(c)
+    return out
+
+
+def fetch_shared_turnout_headlines(states: list[str], limit_each: int = 14) -> list[str]:
+    """
+    Broad RSS queries aligned with Google News web searches like
+    voter turnout / voter turnout 2026 (see news.google.com search for India).
+    Fetched once per cycle and merged into each state's LLM context.
+    """
+    if not states:
+        return []
+    ors = states_or_rss_group(states)
+    queries = [
+        f"voter turnout {ors} when:1d",
+        f"voter turnout 2026 {ors} when:1d",
+        f"Assembly elections 2026 LIVE turnout {ors} when:1d",
+        f'{ors} ("voter turnout" OR "polling percentage" OR "percent turnout" OR turnout) election 2026 when:1d',
+        f'India election 2026 {ors} (turnout OR polling OR percent) when:1d',
+    ]
+    chunks: list[str] = []
+    seen: set[str] = set()
+    for q in queries:
+        for ch in fetch_query_chunks(q, limit_each, "headlines"):
+            u = ""
+            if "URL:" in ch:
+                try:
+                    u = ch.split("URL:", 1)[1].split("|", 1)[0].strip()
+                except IndexError:
+                    u = ""
+            key = u or ch[:220]
+            if key in seen:
+                continue
+            seen.add(key)
+            chunks.append(ch)
+    return chunks
 
 
 def fetch_query_chunks(query: str, limit: int, label: str) -> list[str]:
@@ -335,26 +500,37 @@ def llm_json(model: str, prompt: str) -> dict:
     return json.loads(text)
 
 
-def dual_consensus_turnout(state: str, finalize: bool) -> dict | None:
+def dual_consensus_turnout(state: str, finalize: bool, shared_chunks: list[str] | None = None) -> dict | None:
     """Pass A: extract numeric claims + raw incidents; Pass B: neutral range + booth lines + citations."""
+    shared = list(shared_chunks or [])
+    # State-scoped wire (same intent as Google News "voter turnout 2026" + state)
+    st_q = f'"{state}"' if " " in state else state
+    state_wire = fetch_query_chunks(
+        f"{st_q} (voter turnout OR turnout percent OR polling percentage) 2026 when:1d",
+        12,
+        "state_wire",
+    )
     news = fetch_corpus(state, "(turnout OR voting OR polling OR booth OR EVM OR percent OR percentage)", 12)
     booth = fetch_booth_corpus(state, 10)
     eci = fetch_eci_corpus(state, 6)
-    corpus = news + booth + eci
+    corpus = dedupe_corpus_chunks(shared + state_wire + news + booth + eci)
     if not corpus:
         print(f"      [!] No corpus for {state} (check network / Google News RSS)")
         return None
     joined = "\n---\n".join(corpus)
-    max_in = 14_000
+    max_in = 18_000
     if len(joined) > max_in:
         joined = joined[:max_in] + "\n...[truncated]"
 
     extract_prompt = f"""
 You are extracting factual claims for {state} Assembly Election 2026 (India), from news text only.
 
-1) Numeric TURNOUT: each distinct percentage (or range like 65-70) explicitly tied to {state} voting today / phase.
-2) BOOTH / FIELD REPORTS: queues, EVM swap, re-poll ordered, violence, long lines, notable incidents — even WITHOUT a turnout number.
-   Include approximate location or AC name if stated.
+The TEXT includes [headlines] RSS items (broad "voter turnout" style wires) plus state-specific clips. It may mention several states in one article.
+
+1) Numeric TURNOUT for {state} ONLY: every distinct percentage (or range) that clearly refers to {state}
+   (including time-slice figures like "4.4% till 9am", "12% in first two hours", district-wise % if tied to {state}).
+   Do NOT attach another state's figure to {state}.
+2) BOOTH / FIELD REPORTS for {state} ONLY: queues, EVM swap, re-poll, violence, long lines — even without a turnout number.
 
 Return pure JSON (no markdown):
 {{
@@ -364,7 +540,8 @@ Return pure JSON (no markdown):
 
 Rules:
 - turnout_pct must be a number (use midpoint if a range like 65-70 is given).
-- If no numeric turnout appears, claims may be empty but booth_incidents_raw should still list notable booth/polling items from the text.
+- If no numeric turnout for {state}, claims may be empty; still list booth_incidents_raw for {state} when present.
+- Use the URL from the same snippet as each claim/incident when available.
 
 TEXT:
 {joined}
@@ -385,14 +562,15 @@ Given extracted claims (not raw articles), produce:
 - turnout_min / turnout_max (inclusive %). Use 0 only if no numeric turnout evidence exists.
 - confidence_0_1
 - one sentence methodology_note (no outlet names in the note)
-- booth_news: up to 6 items {{text, source}} — include:
-  * significant booth/EVM/queue/violence lines; source = the publisher article URL copied exactly from the "URL: ..." field in TEXT (never use news.google.com links)
-  * short paraphrases from booth_incidents_raw
-- citations: up to 5 items {{outlet, url}} supporting the turnout range (if any)
+- booth_news: up to 6 items {{text, source}} — every item MUST have text with at least 12 characters (no empty strings, no "...").
+  * significant booth/EVM/queue/violence lines; source = publisher URL from "URL: ..." in TEXT (not news.google.com)
+  * paraphrases from booth_incidents_raw
+- citations: up to 5 items {{outlet, url}} — outlet MUST be the real news brand (e.g. India TV, ANI), never the word "Source" alone
 
 Rules:
-- Do not invent percentages. If no numeric turnout, set turnout_min and turnout_max to 0 but still fill booth_news from incidents.
+- Do not invent percentages. If no numeric turnout, set turnout_min and turnout_max to 0 but still fill booth_news from incidents when present.
 - If claims conflict, use a wider range and lower confidence.
+- Omit a citation entirely if you do not know the outlet name.
 
 EXTRACTED_CLAIMS_JSON:
 {claims}
@@ -417,14 +595,35 @@ Return pure JSON (no markdown):
         return None
 
     booth = list(out.get("booth_news") or [])
+    # Visible lines from extract (wires often have % in pass A but consensus leaves booth empty)
+    claim_lines = booth_lines_from_extract_claims(extracted)
+    booth = claim_lines + booth
+    apply_extract_turnout_fallback(extracted, out)
+    booth = prune_booth_news_items(booth)
+
     for c in (out.get("citations") or [])[:5]:
-        url = c.get("url") or ""
-        outlet = c.get("outlet") or "Source"
-        if url:
-            booth.append({"text": f"Source track: {outlet}", "source": url, "type": "citation"})
-    note = out.get("methodology_note") or ""
-    if note:
-        booth.append({"text": note[:280], "source": "", "type": "methodology"})
+        if not isinstance(c, dict):
+            continue
+        url = str(c.get("url") or "").strip()
+        outlet = str(c.get("outlet") or "").strip()
+        if not url:
+            continue
+        if len(outlet) < 2 or outlet.lower() in ("source", "unknown", "news", "media"):
+            label = "Press report"
+        else:
+            label = f"{outlet} — turnout sourcing"
+        booth.append({"text": label, "source": url, "type": "citation"})
+
+    note = str(out.get("methodology_note") or "").strip()
+    if len(note) >= 20:
+        boiler = re.match(
+            r"^no (numeric|specific).*turnout.*(claims|reports|provided|available)",
+            note,
+            re.I,
+        )
+        if not (boiler and len(booth) > 0):
+            booth.append({"text": note[:280], "source": "", "type": "methodology"})
+    booth = prune_booth_news_items(booth)
     out["booth_news"] = sanitize_booth_news_urls(booth)
     return out
 
@@ -472,9 +671,11 @@ def ingest_turnout_for_states(states: list[str], finalize: bool) -> None:
     slot = format_time_slot_ist(now, finalize=finalize)
     label = "FINAL TURNOUT PASS" if finalize else "LIVE TURNOUT"
     print(f"\n[+] {label} — {', '.join(states)} | slot={slot}")
+    shared = fetch_shared_turnout_headlines(states)
+    print(f"   [i] Shared turnout headline RSS chunks: {len(shared)} (voter turnout / 2026 / LIVE wires)")
     for state in states:
         try:
-            data = dual_consensus_turnout(state, finalize=finalize)
+            data = dual_consensus_turnout(state, finalize=finalize, shared_chunks=shared)
             if not data:
                 continue
             upsert_turnout_row(state, data, slot)
