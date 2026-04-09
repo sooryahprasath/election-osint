@@ -9,6 +9,8 @@ Token discipline: one search-grounded call per state per cycle; optional cheap o
   TURNOUT_GROUNDED_MAX_OUTPUT_TOKENS  optional (512–8192, default 8192) — raise if JSON is cut off (finish_reason=MAX_TOKENS).
   TURNOUT_ECI_POLLING_TREND=1  optional — Playwright scrape of ECINet polling trend (see eci_polling_trend.py).
   TURNOUT_ECI_HEADLESS=0  optional — show browser when debugging ECI scrape.
+  TURNOUT_NUMBERS_SOURCE=eci  optional — official ECINet % (batched) + AI only for booth_news; see voting_day_ingestor.
+  ECI_SCRAPE_GRACE_MIN / ECI_BATCH_MIN_INTERVAL_SEC — see eci_polling_trend.py
 """
 from __future__ import annotations
 
@@ -370,6 +372,107 @@ def _parse_json_response(text: str) -> dict[str, Any]:
     return json.loads(blob)
 
 
+def postprocess_turnout_row_for_ingest(data: dict[str, Any]) -> dict[str, Any]:
+    """Methodology row, prune, sanitize URLs (shared by full and booth-only pipelines)."""
+    note = str(data.get("methodology_note") or "").strip()
+    if len(note) >= 24:
+        booth = list(data.get("booth_news") or [])
+        booth.append({"text": note[:280], "source": "", "type": "methodology"})
+        data["booth_news"] = booth
+
+    import voting_day_ingestor as vd
+
+    booth = list(data.get("booth_news") or [])
+    booth = vd.prune_booth_news_items(booth)
+    data["booth_news"] = vd.sanitize_booth_news_urls(booth)
+    return data
+
+
+def apply_eci_snapshot_to_turnout_data(data: dict[str, Any], eci_snap: dict[str, Any] | None) -> None:
+    """Overlay official ECI table snapshot onto row (turnout % + eci_encore booth line)."""
+    if eci_snap:
+        merge_eci_polling_trend_into_out(data, eci_snap)
+
+
+def run_booth_only_grounded_pipeline(
+    client: "genai_mod.Client",
+    state: str,
+    finalize: bool,
+    now: datetime,
+) -> dict[str, Any] | None:
+    """
+    Single Gemini + Search call for **booth / field lines only** (no turnout % in prompt).
+    Returns validated dict with turnout_min/max 0 — numbers come from ECI batch elsewhere.
+    """
+    from zoneinfo import ZoneInfo
+
+    IST = ZoneInfo(IST_ZONE)
+    ist = now.astimezone(IST)
+    date_s = ist.strftime("%Y-%m-%d")
+    clock_s = ist.strftime("%H:%M")
+
+    phase_note = (
+        "Focus on **final / closing** incidents and official wrap-ups after polls."
+        if finalize
+        else "Focus on **intraday** field reports: EVM, re-poll, queues, violence, police — today IST."
+    )
+
+    prompt = f"""{phase_note}
+State: {state} — India Legislative Assembly election 2026.
+IST date: {date_s} (now about {clock_s} IST).
+
+Use Google Search. Find up to **3** short **booth / field** lines for **{state}** for **{date_s}** (or clearly today IST):
+EVM malfunction/replacement, re-poll ordered, violence, police, long queues — each tied to this state.
+
+Do **not** include voter turnout percentages in your answer (official turnout is taken from ECI separately).
+
+Output **only** valid JSON — no markdown, no code fences:
+{{
+  "confidence_0_1": 0.55,
+  "methodology_note": "max 90 chars no double quotes inside",
+  "booth_news": [{{"text": "min 15 chars factual line", "source": "https://publisher/..."}}]
+}}
+
+Hard rules:
+- Every booth_news.source MUST be **https** from a page you found; text ≥ 15 characters.
+- Do **not** invent URLs. If nothing credible, return an empty booth_news array.
+- methodology_note: optional, max ~90 characters.
+"""
+
+    tool = types.Tool(google_search=types.GoogleSearch())
+    cfg = types.GenerateContentConfig(
+        tools=[tool],
+        temperature=0.15,
+        max_output_tokens=_grounded_max_output_tokens(),
+        thinking_config=types.ThinkingConfig(thinking_budget=0),
+    )
+
+    try:
+        resp = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=cfg,
+        )
+        raw_text = _collect_response_text(resp)
+    except Exception as e:
+        print(f"      [!] Booth-only grounded {state}: {e}")
+        return None
+
+    if not raw_text:
+        print(f"      [!] Booth-only grounded {state}: empty model text")
+        return None
+
+    try:
+        data = validate_and_trim_grounded_json(_parse_json_response(raw_text))
+    except (json.JSONDecodeError, ValueError) as e:
+        print(f"      [!] Booth-only JSON {state}: {e}")
+        return None
+
+    data["turnout_min"] = 0.0
+    data["turnout_max"] = 0.0
+    return data
+
+
 def run_grounded_turnout_pipeline(
     client: "genai_mod.Client",
     state: str,
@@ -472,9 +575,9 @@ Hard rules:
             return None
 
     try:
-        from eci_polling_trend import eci_polling_enabled, fetch_eci_polling_trend_playwright
+        from eci_polling_trend import eci_polling_enabled, eci_numbers_primary_enabled, fetch_eci_polling_trend_playwright
 
-        if eci_polling_enabled():
+        if eci_polling_enabled() and not eci_numbers_primary_enabled():
             try:
                 eci_snap = fetch_eci_polling_trend_playwright(state)
                 if eci_snap:
@@ -490,17 +593,7 @@ Hard rules:
     # Re-validate booth after merge (official_hint has https)
     data = validate_and_trim_grounded_json(data)
 
-    note = str(data.get("methodology_note") or "").strip()
-    if len(note) >= 24:
-        booth = list(data.get("booth_news") or [])
-        booth.append({"text": note[:280], "source": "", "type": "methodology"})
-        data["booth_news"] = booth
-
-    import voting_day_ingestor as vd
-
-    booth = list(data.get("booth_news") or [])
-    booth = vd.prune_booth_news_items(booth)
-    data["booth_news"] = vd.sanitize_booth_news_urls(booth)
+    data = postprocess_turnout_row_for_ingest(data)
 
     try:
         lo = float(data.get("turnout_min") or 0)

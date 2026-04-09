@@ -6,6 +6,7 @@ import { useLiveData } from "@/lib/context/LiveDataContext";
 import { ELECTION_DATES } from "@/lib/utils/countdown";
 import { getWarRoomPhase, istMinutesSinceMidnight, sameISTCalendarDay } from "@/lib/utils/warRoomSchedule";
 import {
+  articleHostnameLabel,
   articleLinkUiLabel,
   contextualSearchUrl,
   safeNewsArticleHref,
@@ -423,73 +424,91 @@ export default function VotingHud({
           )}
 
           {isVoting && activeTab === "TURNOUT" && (
-            <div className="mt-4 rounded-xl border border-[color:var(--border)] bg-[var(--surface-2)]/40 p-3 ring-1 ring-black/[0.02] dark:bg-[var(--surface-1)] dark:ring-white/[0.04] md:p-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
+            <section
+              className="mt-5 border-t border-[color:var(--border)] pt-4"
+              aria-labelledby="voting-notes-heading"
+            >
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2
+                      id="voting-notes-heading"
+                      className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-secondary)]"
+                    >
+                      Notes & sources
+                    </h2>
+                    <span className="text-[11px] text-[var(--text-muted)]">
+                      Up to {MAX_NOTES_PER_STATE} per state · tap a link to open
+                    </span>
+                  </div>
+                </div>
+                <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
                   <button
                     type="button"
                     onClick={() => setNotesOpen((v) => !v)}
-                    className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-[color:var(--border)] bg-[var(--surface-1)] px-3 py-2 font-mono text-[10px] font-bold tracking-wider text-[var(--text-secondary)] shadow-sm hover:bg-[var(--surface-2)] md:min-h-0 md:py-1.5"
+                    className="inline-flex items-center gap-1 text-xs font-medium text-sky-700 hover:underline dark:text-sky-400"
                     aria-expanded={notesOpen}
                   >
                     {notesOpen ? (
-                      <ChevronUp className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
+                      <>
+                        <ChevronUp className="h-3.5 w-3.5" aria-hidden />
+                        Collapse
+                      </>
                     ) : (
-                      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
+                      <>
+                        <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+                        Expand
+                      </>
                     )}
-                    NOTES & SOURCES
                   </button>
-                  <p className="mt-1.5 hidden text-[11px] text-[var(--text-secondary)] sm:block">
-                    Up to {MAX_NOTES_PER_STATE} items per state · verified links when the worker stored a URL
-                  </p>
-                </div>
-                <div
-                  className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 [-ms-overflow-style:none] [scrollbar-width:none] sm:max-w-[55%] [&::-webkit-scrollbar]:hidden"
-                  role="tablist"
-                  aria-label="Filter notes by state"
-                >
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={notesState === "ALL"}
-                    onClick={() => setNotesState("ALL")}
-                    className={`shrink-0 rounded-lg border px-3 py-2.5 font-mono text-[10px] font-bold transition-colors md:py-2 ${
-                      notesState === "ALL"
-                        ? "border-sky-300 bg-sky-50 text-sky-950 dark:border-sky-500/35 dark:bg-sky-500/15 dark:text-sky-100"
-                        : "border-[color:var(--border)] bg-[var(--surface-1)] text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
-                    }`}
-                  >
-                    ALL
-                  </button>
-                  {activeStates.map((st) => (
-                    <button
-                      key={st}
-                      type="button"
-                      role="tab"
-                      aria-selected={notesState === st}
-                      onClick={() => setNotesState(st)}
-                      className={`shrink-0 rounded-lg border px-3 py-2.5 font-mono text-[10px] font-bold transition-colors md:py-2 ${
-                        notesState === st
-                          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                          : "border-[color:var(--border)] bg-[var(--surface-1)] text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
-                      }`}
-                    >
-                      {st.toUpperCase()}
-                    </button>
-                  ))}
                 </div>
               </div>
-              <p className="mt-2 text-[11px] text-[var(--text-secondary)] sm:hidden">
-                Up to {MAX_NOTES_PER_STATE} items per state · tap a link to open the source
-              </p>
+
+              <div
+                className="mt-3 flex w-full gap-1 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:max-w-none"
+                role="tablist"
+                aria-label="Filter notes by state"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={notesState === "ALL"}
+                  onClick={() => setNotesState("ALL")}
+                  className={`shrink-0 border-b-2 px-2 py-1.5 text-xs font-medium transition-colors ${
+                    notesState === "ALL"
+                      ? "border-sky-600 text-[var(--text-primary)] dark:border-sky-400"
+                      : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                  }`}
+                >
+                  All
+                </button>
+                {activeStates.map((st) => (
+                  <button
+                    key={st}
+                    type="button"
+                    role="tab"
+                    aria-selected={notesState === st}
+                    onClick={() => setNotesState(st)}
+                    className={`shrink-0 border-b-2 px-2 py-1.5 text-xs font-medium transition-colors ${
+                      notesState === st
+                        ? "border-sky-600 text-[var(--text-primary)] dark:border-sky-400"
+                        : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                    }`}
+                  >
+                    {st}
+                  </button>
+                ))}
+              </div>
 
               {!notesOpen ? (
-                <div className="mt-3 rounded-lg border border-[color:var(--border)] bg-[var(--surface-2)] px-3 py-2">
-                  <div className="font-mono text-[9px] font-bold text-[var(--text-muted)]">TOP NOTES</div>
-                  <div className="mt-2 grid gap-1.5">
+                <div className="mt-3">
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
+                    Latest
+                  </p>
+                  <ul className="mt-2.5 space-y-2.5">
                     {(() => {
                       const states = notesState === "ALL" ? activeStates : [notesState];
-                      const flat: { st: string; n: any }[] = [];
+                      const flat: { st: string; n: Record<string, unknown> }[] = [];
                       for (const st of states) {
                         const row = latestTurnoutByState.get(st);
                         const bullets = filterRenderableBoothNews(row?.booth_news);
@@ -497,41 +516,57 @@ export default function VotingHud({
                       }
                       const pick = flat.slice(0, 2);
                       return pick.length > 0 ? (
-                        pick.map((x, idx) => (
-                          <div key={idx} className="flex items-start gap-2 rounded border border-[color:var(--border)] bg-[var(--surface-1)] px-2 py-1">
-                            <span className="mt-0.5 shrink-0 font-mono text-[8px] font-bold text-[var(--text-secondary)]">{x.st.toUpperCase()}</span>
-                            <span className="min-w-0 text-[11px] text-[var(--text-primary)]">{x.n?.text}</span>
-                          </div>
-                        ))
+                        pick.map((x, idx) => {
+                          const isMeta = x.n.type === "methodology";
+                          const accent =
+                            isMeta ? "bg-zinc-400" : x.n.type === "citation" ? "bg-sky-500" : "bg-amber-500";
+                          return (
+                            <li
+                              key={idx}
+                              className="flex overflow-hidden rounded-lg border border-[color:var(--border)] bg-[var(--surface-1)] shadow-sm dark:shadow-black/20"
+                            >
+                              <span className={`w-1 shrink-0 ${accent}`} aria-hidden />
+                              <div className="min-w-0 flex-1 px-2.5 py-2">
+                                <p className="font-mono text-[9px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                                  {x.st}
+                                </p>
+                                <p
+                                  className={`mt-0.5 text-[12px] leading-snug ${
+                                    isMeta ? "text-[var(--text-secondary)] italic" : "text-[var(--text-primary)]"
+                                  }`}
+                                >
+                                  {String(x.n?.text ?? "")}
+                                </p>
+                              </div>
+                            </li>
+                          );
+                        })
                       ) : (
-                        <div className="text-[11px] text-[var(--text-muted)] italic">No notes yet.</div>
+                        <li className="text-sm text-[var(--text-muted)]">No notes yet.</li>
                       );
                     })()}
-                  </div>
+                  </ul>
                   <button
                     type="button"
                     onClick={() => setNotesOpen(true)}
-                    className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-[color:var(--border)] bg-[var(--surface-1)] px-2 py-1 font-mono text-[9px] font-bold text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+                    className="mt-3 text-xs font-medium text-sky-700 hover:underline dark:text-sky-400"
                   >
-                    <ChevronDown className="h-3.5 w-3.5 text-[var(--text-muted)]" /> SHOW ALL
+                    Show all notes
                   </button>
                 </div>
               ) : (
-                <div className="mt-3 grid gap-3">
+                <div className="mt-4 space-y-8">
                   {(notesState === "ALL" ? activeStates : [notesState]).map((st) => {
                     const row = latestTurnoutByState.get(st);
                     const bullets = filterRenderableBoothNews(row?.booth_news);
                     return (
-                      <div
-                        key={st}
-                        className="rounded-xl border border-[color:var(--border)] bg-[var(--surface-1)] px-3 py-3 shadow-sm md:px-4 md:py-3.5"
-                      >
-                        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                          <span className="font-mono text-[10px] font-bold tracking-wider text-[var(--text-primary)]">
-                            {st.toUpperCase()}
-                          </span>
+                      <div key={st}>
+                        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-[color:var(--border)]/80 pb-2">
+                          <h3 className="text-[13px] font-semibold tracking-tight text-[var(--text-primary)]">
+                            {st}
+                          </h3>
                           <span
-                            className="font-mono text-[10px] text-[var(--text-secondary)]"
+                            className="font-mono text-[10px] text-[var(--text-muted)]"
                             suppressHydrationWarning
                           >
                             {row?.updated_at
@@ -540,10 +575,11 @@ export default function VotingHud({
                           </span>
                         </div>
                         {bullets.length > 0 ? (
-                          <ul className="mt-3 list-none space-y-2.5 p-0">
+                          <ul className="flex flex-col gap-3">
                             {bullets.slice(0, MAX_NOTES_PER_STATE).map((n: Record<string, unknown>, idx: number) => {
                               const isMeta = n.type === "methodology";
                               const isCit = n.type === "citation";
+                              const isEci = n.type === "eci_encore";
                               const srcRaw = typeof n.source === "string" ? n.source.trim() : "";
                               const hasHttpSource = /^https?:\/\//i.test(srcRaw);
                               const noteText = String(n.text || "").trim();
@@ -555,74 +591,84 @@ export default function VotingHud({
                                   ? contextualSearchUrl(st, noteText)
                                   : "";
                               const href = primaryHref || searchHref;
-                              const linkLabel = href ? articleLinkUiLabel(href) : "";
                               const isSearchOnly = Boolean(searchHref && !primaryHref);
+                              const isGoogleSearch =
+                                !!href &&
+                                href.includes("google.com/search") &&
+                                href.includes("q=");
+                              const host = href ? articleHostnameLabel(href) : "";
+                              const linkSubtitle = isSearchOnly || isGoogleSearch
+                                ? "Search related coverage"
+                                : host
+                                  ? host
+                                  : href
+                                    ? articleLinkUiLabel(href)
+                                    : "";
+                              const accent = isMeta
+                                ? "bg-zinc-400"
+                                : isEci
+                                  ? "bg-emerald-600"
+                                  : isCit
+                                    ? "bg-sky-500"
+                                    : "bg-amber-500";
 
                               return (
                                 <li
                                   key={idx}
-                                  className={`rounded-lg border border-[color:var(--border)] bg-[var(--surface-2)]/50 px-3 py-2.5 dark:bg-[var(--surface-2)]/30 ${
-                                    isMeta ? "border-dashed" : ""
-                                  }`}
+                                  className="flex overflow-hidden rounded-xl border border-[color:var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(15,23,42,0.06)] dark:bg-[var(--surface-1)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.35)]"
                                 >
-                                  <div className="flex gap-3">
-                                    <span
-                                      className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
-                                        isMeta ? "bg-zinc-400" : isCit ? "bg-sky-500" : "bg-amber-500"
+                                  <span className={`w-1 shrink-0 ${accent}`} aria-hidden />
+                                  <div className="min-w-0 flex-1 px-3 py-3 md:px-3.5 md:py-3.5">
+                                    <p
+                                      className={`text-[13px] leading-[1.45] md:text-sm md:leading-relaxed ${
+                                        isMeta
+                                          ? "text-[var(--text-secondary)]"
+                                          : "text-[var(--text-primary)]"
                                       }`}
-                                      aria-hidden
-                                    />
-                                    <div className="min-w-0 flex-1">
-                                      <p
-                                        className={`text-[13px] leading-snug ${
-                                          isMeta
-                                            ? "italic text-[var(--text-secondary)]"
-                                            : "text-[var(--text-primary)]"
-                                        }`}
-                                      >
-                                        {String(n.text ?? "")}
-                                      </p>
-                                      {href ? (
+                                    >
+                                      {String(n.text ?? "")}
+                                    </p>
+                                    {href ? (
+                                      <div className="mt-3 border-t border-[color:var(--border)]/70 pt-2.5">
+                                        <p className="mb-1 font-mono text-[9px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                                          Source
+                                        </p>
                                         <a
                                           href={href}
                                           target="_blank"
                                           rel="noopener noreferrer"
-                                          className="mt-2 inline-flex min-h-11 w-full max-w-full items-center gap-2 rounded-lg border border-sky-500/25 bg-sky-500/[0.07] px-3 py-2 text-left text-[12px] font-medium text-sky-700 transition-colors hover:bg-sky-500/15 dark:text-sky-200 dark:hover:bg-sky-500/20 md:min-h-0 md:w-auto md:border-transparent md:bg-transparent md:px-0 md:py-1"
+                                          className="inline-flex min-h-11 w-full max-w-full items-start gap-2 rounded-lg px-1 py-1.5 text-left text-[13px] font-medium text-sky-700 -outline-offset-2 hover:bg-sky-500/[0.08] dark:text-sky-400 md:min-h-0 md:inline-flex md:w-auto md:items-center"
                                         >
-                                          <ExternalLink className="h-4 w-4 shrink-0 opacity-90" aria-hidden />
-                                          <span className="min-w-0 break-words">{linkLabel}</span>
-                                          {isSearchOnly ? (
-                                            <span className="ml-auto shrink-0 rounded bg-[var(--surface-3)] px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase text-[var(--text-muted)] md:ml-2">
-                                              Find
-                                            </span>
-                                          ) : null}
+                                          <ExternalLink
+                                            className="mt-0.5 h-4 w-4 shrink-0 opacity-85 md:mt-0"
+                                            aria-hidden
+                                          />
+                                          <span className="min-w-0 break-words leading-snug">{linkSubtitle}</span>
                                         </a>
-                                      ) : !isMeta ? (
-                                        <p className="mt-2 text-[11px] text-[var(--text-muted)]">
-                                          No URL on file for this line.
-                                        </p>
-                                      ) : null}
-                                    </div>
+                                      </div>
+                                    ) : !isMeta ? (
+                                      <p className="mt-2 border-t border-[color:var(--border)]/70 pt-2 font-mono text-[10px] text-[var(--text-muted)]">
+                                        No source URL on file for this line.
+                                      </p>
+                                    ) : null}
                                   </div>
                                 </li>
                               );
                             })}
                           </ul>
                         ) : row ? (
-                          <div className="mt-3 text-[12px] leading-snug text-[var(--text-secondary)]">
-                            No readable notes after last sync — tap REFRESH or wait for the worker.
-                          </div>
+                          <p className="text-sm text-[var(--text-secondary)]">
+                            No readable notes after last sync — use REFRESH or wait for the worker.
+                          </p>
                         ) : (
-                          <div className="mt-3 text-[12px] text-[var(--text-secondary)]">
-                            Awaiting first ingest cycle…
-                          </div>
+                          <p className="text-sm text-[var(--text-secondary)]">Awaiting first ingest cycle…</p>
                         )}
                       </div>
                     );
                   })}
                 </div>
               )}
-            </div>
+            </section>
           )}
 
           {isVoting && activeTab === "EXIT_POLLS" && (
@@ -632,7 +678,7 @@ export default function VotingHud({
                   <BarChart3 className="h-8 w-8 text-[var(--text-muted)] mb-2 opacity-50" />
                   <p className="font-mono text-sm font-bold text-[var(--text-secondary)]">EMBARGO ACTIVE</p>
                   <p className="font-mono text-[10px] text-[var(--text-muted)] mt-1 text-center max-w-sm px-4">
-                    Exit-poll tab unlocks from 19:15 IST on polling days (or use dev time override after 19:15).
+                    Exit-poll tab unlocks from 19:15 IST on polling days.
                   </p>
                 </div>
               ) : (

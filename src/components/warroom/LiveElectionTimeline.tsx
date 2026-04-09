@@ -120,17 +120,17 @@ export default function LiveElectionTimeline({
               />
             </div>
           </div>
-          <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
+          <div className="grid grid-cols-4 gap-1 sm:gap-1.5">
             {intraday.steps.map((s) => (
               <div
                 key={s.key}
                 className={[
-                  "rounded-lg border px-1.5 py-1.5 text-center sm:px-2",
+                  "min-w-0 rounded-md px-1 py-1.5 text-center sm:px-1.5",
                   s.current
-                    ? "border-orange-500/50 bg-orange-500/10"
+                    ? "bg-orange-500/15 ring-1 ring-orange-500/40"
                     : s.done
-                      ? "border-emerald-500/30 bg-emerald-500/5 opacity-80"
-                      : "border-[color:var(--border)] bg-[var(--surface-1)]/60 opacity-70",
+                      ? "text-[var(--text-secondary)] opacity-90"
+                      : "text-[var(--text-muted)] opacity-75",
                 ].join(" ")}
               >
                 <div className="font-mono text-[8px] font-bold leading-tight text-[var(--text-primary)] sm:text-[9px]">

@@ -10,11 +10,25 @@ Schedule (polling calendar days only — see PHASE_STATES):
 Env:
   TURNOUT_INGEST_MODE=grounded|rss   default grounded — RSS uses dual LLM + News RSS corpus.
   TURNOUT_ECI_POLLING_TREND=1   optional — grounded pipeline also scrapes ECINet polling trend (Playwright; see eci_polling_trend.py).
-  VOTING_INGEST_INTERVAL_SEC   optional — seconds between cycles in TURNOUT_LIVE (default 600).
+  TURNOUT_NUMBERS_SOURCE=eci   optional — official ECINet % for all states in one batched scrape; Gemini only enriches booth_news (see eci_polling_trend.py for grace / throttle env).
+  VOTING_INGEST_INTERVAL_SEC   optional — seconds between cycles in TURNOUT_LIVE (default 600). Use 1200 for ~20 min booth refresh.
+Production (ECI numbers + booth every 20 min, all states on poll days):
+  Do not pass --force-states — the script uses PHASE_STATES for today’s IST date.
+  Run the daemon (not --once):  python3 voting_day_ingestor.py
+  Example env:
+    export TURNOUT_NUMBERS_SOURCE=eci
+    export TURNOUT_INGEST_MODE=grounded
+    export VOTING_INGEST_INTERVAL_SEC=1200
+    export ECI_SCRAPE_GRACE_MIN=12
+  First process start always hits ECINet once (empty cache). After that, Playwright runs again when the IST schedule
+  fingerprint advances (intraday slots + grace / COP). Each cycle still runs Gemini booth_news per state.
+  Important: use the long-running daemon for this split. Cron `python … --once` every 20m starts a fresh process each
+  time and will re-scrape ECINet on every run (no in-memory cache).
 
 Run under systemd with Restart=always, or cron @reboot + loop.
 Test:  python voting_day_ingestor.py --once
        python voting_day_ingestor.py --once --force-states Kerala Assam
+       python voting_day_ingestor.py --once --force-eci   # clear ECI cache and re-scrape ECINet this run
 """
 from __future__ import annotations
 
@@ -76,6 +90,13 @@ def states_for_calendar(d: date) -> list[str]:
         if poll_date == d:
             return list(states)
     return []
+
+
+def eci_phase_for_states(states: list[str], d: date) -> str:
+    """ECI assembly phase for ECINet polling-trend scrape (mirrors PHASE_STATES)."""
+    if d == date(2026, 4, 29) and any(s.strip() == "West Bengal" for s in states):
+        return "2"
+    return "1"
 
 
 def ist_now() -> datetime:
@@ -671,7 +692,12 @@ def upsert_turnout_row(state: str, data: dict, time_slot: str) -> None:
         print(f"      [!] Supabase upsert failed: {e}")
 
 
-def ingest_turnout_for_states(states: list[str], finalize: bool) -> None:
+def ingest_turnout_for_states(
+    states: list[str],
+    finalize: bool,
+    *,
+    bust_eci_cache: bool = False,
+) -> None:
     now = ist_now()
     slot = format_time_slot_ist(now, finalize=finalize)
     label = "FINAL TURNOUT PASS" if finalize else "LIVE TURNOUT"
@@ -691,6 +717,63 @@ def ingest_turnout_for_states(states: list[str], finalize: bool) -> None:
                 hi = data.get("turnout_max")
                 bn = len(data.get("booth_news") or [])
                 print(f"   -> [OK] {state}  {lo}%–{hi}%  (conf {data.get('confidence_0_1')})  booth_items={bn}")
+            except Exception as e:
+                print(f"   -> [ERR] {state}: {e}")
+        return
+
+    nums_src = (os.getenv("TURNOUT_NUMBERS_SOURCE") or "ai").strip().lower()
+
+    if nums_src == "eci":
+        print(
+            "   [i] Turnout pipeline: ECINet batched (slot-aware) + Gemini booth_news only"
+        )
+        if not gemini_client:
+            print("   [!] GEMINI_API_KEY missing — cannot enrich booth_news; ECI % still attempted")
+        from eci_polling_trend import fetch_eci_batch_cached
+        from turnout_grounded import (
+            apply_eci_snapshot_to_turnout_data,
+            postprocess_turnout_row_for_ingest,
+            run_booth_only_grounded_pipeline,
+            validate_and_trim_grounded_json,
+        )
+
+        phase = eci_phase_for_states(states, now.date())
+        try:
+            eci_map = fetch_eci_batch_cached(
+                states, phase, now, finalize=finalize, bust_cache=bust_eci_cache
+            )
+        except Exception as e:
+            print(f"   [!] ECI batch scrape failed: {e}")
+            eci_map = {}
+
+        for state in states:
+            try:
+                data = None
+                if gemini_client:
+                    data = run_booth_only_grounded_pipeline(
+                        gemini_client, state, finalize, now
+                    )
+                if not data:
+                    data = {
+                        "turnout_min": 0.0,
+                        "turnout_max": 0.0,
+                        "confidence_0_1": 0.35,
+                        "methodology_note": "",
+                        "booth_news": [],
+                    }
+                apply_eci_snapshot_to_turnout_data(data, eci_map.get(state))
+                data = validate_and_trim_grounded_json(data)
+                data = postprocess_turnout_row_for_ingest(data)
+                lo = float(data.get("turnout_min") or 0)
+                hi = float(data.get("turnout_max") or 0)
+                if lo <= 0 and hi <= 0 and not data.get("booth_news"):
+                    print(f"   -> [SKIP] {state}: no ECI slice and no booth lines")
+                    continue
+                upsert_turnout_row(state, data, slot)
+                bn = len(data.get("booth_news") or [])
+                print(
+                    f"   -> [OK] {state}  {lo}%–{hi}%  (conf {data.get('confidence_0_1')})  booth_items={bn}"
+                )
             except Exception as e:
                 print(f"   -> [ERR] {state}: {e}")
         return
@@ -793,7 +876,7 @@ def sleep_after_cycle_seconds(mode: str) -> int:
     return 3600
 
 
-def one_cycle(*, force_states: list[str] | None) -> str:
+def one_cycle(*, force_states: list[str] | None, bust_eci: bool = False) -> str:
     now = ist_now()
     states = force_states if force_states else states_for_calendar(now.date())
     if not states:
@@ -812,9 +895,9 @@ def one_cycle(*, force_states: list[str] | None) -> str:
         ingest_exit_polls(states)
         return mode
     if mode == "TURNOUT_FINAL":
-        ingest_turnout_for_states(states, finalize=True)
+        ingest_turnout_for_states(states, finalize=True, bust_eci_cache=bust_eci)
         return mode
-    ingest_turnout_for_states(states, finalize=False)
+    ingest_turnout_for_states(states, finalize=False, bust_eci_cache=bust_eci)
     return mode
 
 
@@ -822,6 +905,11 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--once", action="store_true", help="Single cycle then exit (for tests)")
     ap.add_argument("--force-states", nargs="+", help="Override states (e.g. Kerala Assam)")
+    ap.add_argument(
+        "--force-eci",
+        action="store_true",
+        help="With TURNOUT_NUMBERS_SOURCE=eci: clear ECI batch cache and re-scrape ECINet on the first cycle (daemon) or this run (--once)",
+    )
     args = ap.parse_args()
     force_states = args.force_states if args.force_states else None
 
@@ -834,9 +922,10 @@ def main() -> None:
         sys.exit(1)
 
     if args.once:
-        one_cycle(force_states=force_states)
+        one_cycle(force_states=force_states, bust_eci=args.force_eci)
         return
 
+    force_eci_next = args.force_eci
     while True:
         try:
             now = ist_now()
@@ -844,7 +933,8 @@ def main() -> None:
                 print(f"[i] No poll today ({now.date()} IST) — sleep 1h")
                 time.sleep(3600)
                 continue
-            mode = one_cycle(force_states=force_states)
+            mode = one_cycle(force_states=force_states, bust_eci=force_eci_next)
+            force_eci_next = False
             time.sleep(sleep_after_cycle_seconds(mode))
         except KeyboardInterrupt:
             print("Stopped.")

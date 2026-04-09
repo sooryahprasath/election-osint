@@ -140,21 +140,47 @@ export function getIntradayWarSteps(now: Date, isPollingCalendarDay: boolean, wa
   let segmentPct = 0;
   let headline = "";
   if (warPhase === "TURNOUT_LIVE") {
-    segmentPct = Math.max(0, Math.min(1, (m - t7) / Math.max(1, tFinal - t7)));
-    headline = "Polls open — live turnout window";
+    const windowMins = Math.max(1, tFinal - t7);
+    segmentPct = Math.max(0, Math.min(1, (m - t7) / windowMins));
+    const minsLeft = Math.max(0, tFinal - m);
+    const pctThrough = Math.round(segmentPct * 100);
+    if (minsLeft <= 0) {
+      headline = "Voting window ended at 18:30 IST — final turnout pass is next.";
+    } else {
+      const h = Math.floor(minsLeft / 60);
+      const minRem = minsLeft % 60;
+      const timeLeft =
+        h > 0 ? `${h}h ${minRem}m` : `${minRem} min`;
+      headline = `Voting window 07:00–18:30 IST — about ${timeLeft} left until polls close. ${pctThrough}% through the window.`;
+    }
   } else if (warPhase === "TURNOUT_FINAL") {
     segmentPct = Math.max(0, Math.min(1, (m - tFinal) / Math.max(1, tExit - tFinal)));
-    headline = "Final turnout pass after poll close";
+    const minsLeft = Math.max(0, tExit - m);
+    if (minsLeft <= 0) {
+      headline = "Final turnout pass window ended — exit-poll coverage is live.";
+    } else {
+      const h = Math.floor(minsLeft / 60);
+      const minRem = minsLeft % 60;
+      const timeLeft = h > 0 ? `${h}h ${minRem}m` : `${minsLeft} min`;
+      headline = `Final official turnout pass (18:30–19:15 IST) — about ${timeLeft} until exit-poll window opens.`;
+    }
   } else if (warPhase === "EXIT_POLL") {
     if (m >= tExit) {
       segmentPct = Math.max(0, Math.min(1, (m - tExit) / Math.max(1, 24 * 60 - tExit)));
     } else {
       segmentPct = Math.max(0, Math.min(1, m / Math.max(1, tQuiet)));
     }
-    headline = "Exit-poll broadcast window";
+    headline = "Exit-poll broadcast window (19:15 IST onward).";
   } else if (warPhase === "QUIET") {
     segmentPct = Math.max(0, Math.min(1, (m - tQuiet) / Math.max(1, t7 - tQuiet)));
-    headline = "Quiet hours before polls open";
+    const minsUntilOpen = Math.max(0, t7 - m);
+    const h = Math.floor(minsUntilOpen / 60);
+    const minRem = minsUntilOpen % 60;
+    const timeLeft = h > 0 ? `${h}h ${minRem}m` : `${minsUntilOpen} min`;
+    headline =
+      minsUntilOpen <= 0
+        ? "Pre-open window — polls open at 07:00 IST."
+        : `Pre-open — polls open at 07:00 IST in about ${timeLeft}.`;
   } else {
     headline = "";
   }

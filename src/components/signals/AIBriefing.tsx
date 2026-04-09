@@ -90,21 +90,24 @@ export default function AIBriefing({ onMeta }: { onMeta?: (m: AIBriefingMeta) =>
 
   return (
     <div className="px-3 pb-3 pt-2">
-      <div className="grid gap-2">
+      <div className="overflow-hidden rounded-xl border border-[color:var(--border)] bg-[var(--surface-1)] shadow-sm dark:shadow-black/25">
         {(briefing.paragraphs || []).map((para: any, idx: number) => (
-          <div key={idx} className="rounded-lg border border-[color:var(--border)] bg-[var(--surface-2)] px-2.5 py-2">
-            <div className="flex items-start gap-2">
-              <span
-                className="mt-1 h-2 w-2 rounded-full shrink-0"
-                style={{ backgroundColor: para.color_hex || "#16a34a" }}
-                aria-hidden="true"
-              />
-              <div className="min-w-0">
-                <div className="text-[12px] font-semibold text-[var(--text-primary)] leading-snug">
-                  {String(para.heading || "").replace(/:$/, "")}
-                </div>
-                <div className="mt-0.5 text-[11px] leading-snug text-[var(--text-secondary)]">{para.body}</div>
+          <div
+            key={idx}
+            className={`flex items-start gap-2.5 px-3 py-2.5 ${
+              idx > 0 ? "border-t border-[color:var(--border)]/75" : ""
+            }`}
+          >
+            <span
+              className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
+              style={{ backgroundColor: para.color_hex || "#16a34a" }}
+              aria-hidden="true"
+            />
+            <div className="min-w-0">
+              <div className="text-[12px] font-semibold leading-snug text-[var(--text-primary)]">
+                {String(para.heading || "").replace(/:$/, "")}
               </div>
+              <div className="mt-1 text-[11px] leading-snug text-[var(--text-secondary)]">{para.body}</div>
             </div>
           </div>
         ))}
