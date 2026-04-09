@@ -339,18 +339,24 @@ def fetch_and_ingest():
     now_ist = datetime.now(IST).strftime("%Y-%m-%d %I:%M:%S %p")
     print(f"\n[{now_ist}] Opinion Poll Ingestor waking up (IST)...")
 
-    # Build dedup set from last 7 days
+    # Build dedup sets from last 7 days
     seen_urls: set[str] = set()
     seen_titles: set[str] = set()
+    seen_polls: set[tuple] = set()  # (agency_lower, state_lower, party_a_pct) — prevents same survey from multiple articles
     if supabase:
         try:
             since = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-            res = supabase.table("opinion_polls").select("source_url").gte("created_at", since).limit(500).execute()
+            res = supabase.table("opinion_polls").select("source_url,agency,state,party_a_percentage").gte("created_at", since).limit(500).execute()
             for row in (res.data or []):
                 u = row.get("source_url")
                 if u:
                     seen_urls.add(_canonical_url(u))
-            print(f"   -> Loaded {len(seen_urls)} known URLs from last 7 days.")
+                agency = (row.get("agency") or "").strip().lower()
+                state  = (row.get("state")  or "").strip().lower()
+                pct    = row.get("party_a_percentage")
+                if agency and state and pct is not None:
+                    seen_polls.add((agency, state, pct))
+            print(f"   -> Loaded {len(seen_urls)} known URLs and {len(seen_polls)} known polls from last 7 days.")
         except Exception as e:
             print(f"   [Dedup] Could not load recent polls: {e}")
 
@@ -401,11 +407,21 @@ def fetch_and_ingest():
                     print(f"   -> Skipped (no percentages found)")
                     continue
 
+                poll_key = (
+                    (data.get("agency") or "").strip().lower(),
+                    (data.get("state")  or "").strip().lower(),
+                    data.get("party_a_percentage"),
+                )
+                if poll_key in seen_polls:
+                    print(f"   -> Skipped (duplicate poll: {data.get('agency')} / {data.get('state')})")
+                    continue
+
                 ok = _insert_poll(data, real_url)
                 if ok:
                     seen_urls.add(cu)
                     seen_urls.add(cu_decoded)
                     seen_titles.add(nt)
+                    seen_polls.add(poll_key)
                     saved += 1
 
         except Exception as e:
@@ -445,11 +461,24 @@ def fetch_and_ingest():
             if not data.get("agency") or not data.get("party_a_name"):
                 print(f"   -> Skipped (missing agency or party data)")
                 continue
+            if data.get("party_a_percentage") is None and data.get("party_b_percentage") is None:
+                print(f"   -> Skipped (no percentages found)")
+                continue
+
+            poll_key = (
+                (data.get("agency") or "").strip().lower(),
+                (data.get("state")  or "").strip().lower(),
+                data.get("party_a_percentage"),
+            )
+            if poll_key in seen_polls:
+                print(f"   -> Skipped (duplicate poll: {data.get('agency')} / {data.get('state')})")
+                continue
 
             ok = _insert_poll(data, link)
             if ok:
                 seen_urls.add(cu)
                 seen_titles.add(nt)
+                seen_polls.add(poll_key)
                 saved += 1
 
         except Exception:
