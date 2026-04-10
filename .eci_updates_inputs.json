@@ -1,0 +1,106 @@
+[
+  {
+    "tag": "BUTTON",
+    "type": "button",
+    "name": "",
+    "id": "",
+    "placeholder": "",
+    "aria": "Navigate to Homepage"
+  },
+  {
+    "tag": "BUTTON",
+    "type": "button",
+    "name": "",
+    "id": "",
+    "placeholder": "",
+    "aria": "Change Word Spacing Normal"
+  },
+  {
+    "tag": "BUTTON",
+    "type": "button",
+    "name": "",
+    "id": "",
+    "placeholder": "",
+    "aria": "Change Word Spacing Wide"
+  },
+  {
+    "tag": "BUTTON",
+    "type": "button",
+    "name": "",
+    "id": "",
+    "placeholder": "",
+    "aria": "Change Word Spacing Too Wide"
+  },
+  {
+    "tag": "BUTTON",
+    "type": "button",
+    "name": "",
+    "id": "",
+    "placeholder": "",
+    "aria": "Change Font Size to Small"
+  },
+  {
+    "tag": "BUTTON",
+    "type": "button",
+    "name": "",
+    "id": "",
+    "placeholder": "",
+    "aria": "Change Font Size to Normal"
+  },
+  {
+    "tag": "BUTTON",
+    "type": "button",
+    "name": "",
+    "id": "",
+    "placeholder": "",
+    "aria": "Change Font Size to Large"
+  },
+  {
+    "tag": "BUTTON",
+    "type": "button",
+    "name": "",
+    "id": "",
+    "placeholder": "",
+    "aria": "Navigate To Select Login"
+  },
+  {
+    "tag": "INPUT",
+    "type": "text",
+    "name": "",
+    "id": "\u00abrr\u00bb",
+    "placeholder": "",
+    "aria": ""
+  },
+  {
+    "tag": "BUTTON",
+    "type": "button",
+    "name": "",
+    "id": "",
+    "placeholder": "",
+    "aria": ""
+  },
+  {
+    "tag": "BUTTON",
+    "type": "button",
+    "name": "",
+    "id": "",
+    "placeholder": "",
+    "aria": ""
+  },
+  {
+    "tag": "BUTTON",
+    "type": "button",
+    "name": "",
+    "id": "",
+    "placeholder": "",
+    "aria": "Go to previous page"
+  },
+  {
+    "tag": "BUTTON",
+    "type": "button",
+    "name": "",
+    "id": "",
+    "placeholder": "",
+    "aria": "Go to next page"
+  }
+]

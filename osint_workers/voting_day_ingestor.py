@@ -910,6 +910,24 @@ def one_cycle(*, force_states: list[str] | None, bust_eci: bool = False) -> str:
 
     print(f"[i] IST {now.strftime('%Y-%m-%d %H:%M')} | mode={mode} | states={states}")
 
+    # Same-day ECI press release PDF on ecinet (IST date match) — overrides prior FINAL rows.
+    if (
+        states
+        and gemini_client
+        and os.getenv("ECI_SKIP_PRESS_RELEASE", "").strip().lower() not in ("1", "true", "yes")
+        and minutes_since_midnight(now) >= TURNOUT_FINAL[0] * 60 + TURNOUT_FINAL[1]
+    ):
+        try:
+            from eci_press_release import apply_eci_press_release_final_turnout
+
+            n = apply_eci_press_release_final_turnout(
+                now, states, supabase=supabase, llm_json_fn=llm_json
+            )
+            if n:
+                print(f"   [i] ECI press release PDF — updated {n} state(s)")
+        except Exception as e:
+            print(f"   [!] ECI press release pass failed: {e}")
+
     if mode == "IDLE":
         return mode
     if mode == "EXIT_POLL":

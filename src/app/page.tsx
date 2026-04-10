@@ -12,13 +12,17 @@ import { useLiveData } from "@/lib/context/LiveDataContext";
 import CenterPane from "@/components/center/CenterPane";
 import { CenterModeSwitcher, type CenterMode } from "@/components/center/CenterModeSwitcher";
 import { centerModeForSignal } from "@/lib/utils/signalClassifier";
+import {
+  getDefaultCenterModeOnInitialLoad,
+  shouldShowWarRoomCenterTab,
+} from "@/lib/utils/centerDefaultMode";
 
 const TOPBAR_H = 36;
 const SIDEBAR_W = 280;
 
 export default function Home() {
   type Signal = Record<string, unknown>;
-  const { operationMode } = useLiveData();
+  const { operationMode, simulatedDate } = useLiveData();
   const [flyToState, setFlyToState] = useState<string | null>(null);
   const [globalStateFilter, setGlobalStateFilter] = useState<string>("ALL");
   const [globalConstituencyId, setGlobalConstituencyId] = useState<string | null>(null);
@@ -63,14 +67,22 @@ export default function Home() {
     return () => mq.removeEventListener("change", apply);
   }, []);
 
-  // When voting/counting starts, bias toward the Live monitor in Center (mobile-first).
+  /** One-shot per mount: center default from calendar (Signals vs Live); refresh repeats. */
+  const centerDefaultAppliedRef = useRef(false);
   useEffect(() => {
-    if (operationMode === "PRE-POLL") return;
-    queueMicrotask(() => {
-      setMobileTab("center");
-      setCenterMode("live");
-    });
-  }, [operationMode]);
+    if (centerDefaultAppliedRef.current) return;
+    centerDefaultAppliedRef.current = true;
+    const now = simulatedDate ?? new Date();
+    setCenterMode(getDefaultCenterModeOnInitialLoad(now, operationMode));
+    setMobileTab("center");
+  }, [simulatedDate, operationMode]);
+
+  const effectiveWallNow = simulatedDate ?? new Date();
+  const showWarRoomCenter = shouldShowWarRoomCenterTab(effectiveWallNow) && operationMode !== "PRE-POLL";
+
+  useEffect(() => {
+    if (!showWarRoomCenter && centerMode === "live") setCenterMode("signals");
+  }, [showWarRoomCenter, centerMode]);
 
   const showMapResetButton = centerMode === "map" && (isMdUp || mobileTab === "center");
 
@@ -152,7 +164,7 @@ export default function Home() {
                 <CenterModeSwitcher
                   value={centerMode}
                   onChange={setCenterMode}
-                  showLive={operationMode !== "PRE-POLL"}
+                  showLive={showWarRoomCenter}
                   liveLabel={
                     operationMode === "COUNTING_DAY"
                       ? "COUNTING LIVE"
@@ -175,7 +187,7 @@ export default function Home() {
                 <CenterModeSwitcher
                   value={centerMode}
                   onChange={setCenterMode}
-                  showLive={operationMode !== "PRE-POLL"}
+                  showLive={showWarRoomCenter}
                   liveLabel={
                     operationMode === "COUNTING_DAY"
                       ? "COUNTING LIVE"
