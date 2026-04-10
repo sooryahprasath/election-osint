@@ -16,7 +16,7 @@
 
 <br />
 
-[Architecture](#architecture) · [Data pipelines](#data-pipelines) · [Features](#features) · [Install](#installation) · [Configuration](#configuration) · [Workers](#python-workers-osint_workers) · [API](#http-ingest-api)
+[Architecture](#architecture) · [Data pipelines](#data-pipelines) · [Features](#features) · [Recent updates](#recent-updates) · [Install](#installation) · [Configuration](#configuration) · [Workers](#python-workers-osint_workers) · [API](#http-ingest-api) · [Contributors](#contributors)
 
 </div>
 
@@ -128,7 +128,7 @@ sequenceDiagram
 | **Dossier** | `dossier_ingestor.py` | `candidates` | Playwright + BeautifulSoup on **affidavit.eci.gov.in**; then MyNeta HTML enrichment and fuzzy name matching. Marks stale rows `removed` when absent from latest ECI pass. |
 | **Signals** | `signal_ingestor.py` | `signals`, `briefings` | Multi-feed RSS; Gemini (`google-genai`) for extraction; optional YouTube attachment when `YOUTUBE_API_KEY` is set. Prunes old signals (24h policy in code—check script). |
 | **Volatility** | `intel_ingestor.py` | `constituencies.volatility_score` | Deterministic 0–100 index from contest size, criminal-case caps, and recent signal severity (14-day lookback). |
-| **Voting day** | `voting_day_ingestor.py` | `voter_turnout`, `exit_polls`, related | Scheduled IST windows: turnout + exit-poll style ingestion from news RSS and LLM passes. |
+| **Voting day** | `voting_day_ingestor.py` | `voter_turnout`, `exit_polls`, related | Scheduled IST windows: live/final turnout (Gemini + optional ECINet batch), exit-poll RSS/LLM. **ECI final PDF:** pass `--link <https://…pdf>` or set `ECI_PRESS_PDF_URL` after polls close — see `eci_press_release.py`. |
 | **HTTP ingest** | `POST /api/ingest` | `signals` | Next route uses **Gemini 1.5 Flash** server-side; optional `INGEST_SHARED_SECRET` header for lockdown. |
 
 **Important:** With RLS enabled, **workers must use `SUPABASE_SERVICE_ROLE_KEY`** for writes. The public **anon** key is for read-only dashboard access.
@@ -144,12 +144,29 @@ sequenceDiagram
 - **Signal stream** — cards with severity, verification, geography when present; “hotspots” use recent signals with `constituency_id` in scope.
 - **Intel / candidates** — rows and modals for candidate dossiers (party, assets, criminal cases, ECI/MyNeta links).
 - **Live updates** — `LiveDataContext` subscribes to Supabase Realtime on `constituencies`, `candidates`, `signals`, `briefings`, `voter_turnout`, `exit_polls`, `live_results`.
+- **War room turnout HUD** — Official vs web snapshot badges with **high-contrast** ECI styling in light and dark themes. **Booth news** shows short field-style lines on each state’s **poll calendar day (IST)** only (no source link list in the panel).
+- **Footer** — Status strip (signals / constituencies / candidates counts); operation mode is **not** shown as a bottom-bar chip (reduces clutter).
 
 ### Security model (summary)
 
 - **RLS:** `anon` / `authenticated` = **SELECT only** on public tables; **no** client-side inserts for production OSINT.
 - **Service role:** Workers and server routes that need `INSERT` / `UPDATE` use the service key **only on the server** (never `NEXT_PUBLIC_*`).
 - **Ingest hardening:** Set `INGEST_SHARED_SECRET` and send `x-ingest-secret: <value>` or `Authorization: Bearer <value>` to `/api/ingest`.
+
+---
+
+## Recent updates
+
+Summary of notable changes (war room, workers, and repo hygiene):
+
+| Area | Change |
+|------|--------|
+| **ECI press PDF** | `eci_press_release.py` is **direct-URL only**: Playwright downloads the PDF you provide, `pypdf` extracts text, Gemini parses turnout, Supabase upserts. No press listing, ECINet table scrape, or encrypted list API. |
+| **CLI** | `python voting_day_ingestor.py --link "https://…"` plus `--force-states` or `--eci-press-date` for default states. Optional daemon: `ECI_PRESS_PDF_URL` after **18:30 IST** (disabled with `ECI_SKIP_PRESS_RELEASE=1`). |
+| **Gemini config** | Grounded turnout calls no longer pass deprecated `ThinkingConfig(thinking_budget=…)` (compatible with current `google-genai` / Pydantic). |
+| **Voting HUD** | Booth news: **text-only** field lines; filters out citation / methodology / encore / turnout-claim rows; **poll-day-only (IST)** per state. ECI pills use **dark green + white text** in light mode for readability. |
+| **Bottom bar** | Removed the **MODE: VOTING_DAY** (etc.) chip next to SYS.ONLINE. |
+| **Git** | `.gitignore` includes `.eci*` so local ECI/Playwright probe files are not committed. **`git add .` from `osint_workers/` does not stage root files** — run `git add -A` from the **repo root** (`election-osint/`) before commit. |
 
 ---
 
@@ -285,6 +302,10 @@ python intel_ingestor.py --once
 ```bash
 python voting_day_ingestor.py --once
 # See module docstring for IST schedule and flags.
+
+# ECI final-turnout PDF (direct URL — Playwright + Gemini + DB upsert)
+python voting_day_ingestor.py --link "https://www.eci.gov.in/.../download?..." --force-states Kerala Assam Puducherry
+# Optional: ECI_PRESS_PDF_URL in .env for the long-running daemon after 18:30 IST
 ```
 
 ---
@@ -334,10 +355,20 @@ election-osint/
 │   ├── dossier_ingestor.py
 │   ├── intel_ingestor.py
 │   ├── bulk_seed_constituencies.py
-│   └── voting_day_ingestor.py
+│   ├── voting_day_ingestor.py
+│   └── eci_press_release.py    # Direct PDF URL → turnout upsert
 ├── package.json
 └── README.md
 ```
+
+---
+
+## Contributors
+
+- **[sooryahprasath](https://github.com/sooryahprasath)** 
+- **[justin-aj](https://github.com/justin-aj)** 
+
+Add yourself via PR if you’ve contributed meaningfully and would like to be listed.
 
 ---
 
