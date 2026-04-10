@@ -85,6 +85,15 @@ FEEDS = {
     "Security_Alerts": "https://news.google.com/rss/search?q=Election+violence+OR+booth+capture+OR+EVM+complaint+India+when:1d&hl=en-IN&gl=IN&ceid=IN:en"
 }
 
+# --- GDELT QUERIES ---
+GDELT_QUERIES = {
+    "Tamil_Nadu":  "Tamil Nadu election 2026",
+    "Kerala":      "Kerala election 2026",
+    "West_Bengal": "West Bengal election 2026",
+    "Assam":       "Assam election 2026",
+    "Puducherry":  "Puducherry election 2026",
+}
+
 # --- QUOTA & TIME MANAGEMENT ---
 IST = timezone(timedelta(hours=5, minutes=30))
 YOUTUBE_QUOTA_USED = 0
@@ -388,7 +397,7 @@ def analyze_and_insert(source_title, source_url, original_title, full_text, imag
             rsn = str(analysis.get("relevance_reason") or "low relevance").strip()
             print(f"   ->[DROP] Low election relevance ({rel:.2f}): {rsn[:64]}")
             return False
-        
+
         bullets = analysis.get("bullets", []) if isinstance(analysis, dict) else []
         if not isinstance(bullets, list):
             bullets = []
@@ -514,6 +523,63 @@ def cleanup_old_signals():
     except Exception as e:
         print(f"   ->[Cleanup Error]: {e}")
 
+def fetch_gdelt() -> list[dict]:
+    """Fetch GDELT Doc 2.0 API for each election state. Rate limit: 1 call per 5 seconds."""
+    articles = []
+    for state_context, query_phrase in GDELT_QUERIES.items():
+        data = None
+        backoff = 6
+        for attempt in range(3):
+            try:
+                resp = requests.get(
+                    "https://api.gdeltproject.org/api/v2/doc/doc",
+                    params={
+                        "query": query_phrase,
+                        "mode": "artlist",
+                        "maxrecords": 25,
+                        "format": "json",
+                        "sourcelang": "english",
+                        "sourcecountry": "IN",
+                    },
+                    timeout=15,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                break
+            except Exception as e:
+                print(f"[GDELT] Attempt {attempt + 1} failed for {state_context}: {e}")
+                time.sleep(backoff)
+                backoff *= 2  # Exponential backoff: 6s → 12s → 24s
+        if data is None:
+            print(f"[GDELT] Skipping {state_context} after 3 failed attempts.")
+            continue
+
+        for article in (data.get("articles") or []):
+            title = (article.get("title") or "").strip()
+            url   = (article.get("url") or "").strip()
+            if not title or not url:
+                continue
+            try:
+                seen_date = datetime.strptime(
+                    article.get("seendate", ""), "%Y%m%dT%H%M%SZ"
+                ).replace(tzinfo=timezone.utc)
+            except Exception:
+                seen_date = datetime.now(timezone.utc)
+
+            articles.append({
+                "state_context": state_context,
+                "title":         title,
+                "url":           url,
+                "source_title":  (article.get("domain") or "GDELT").strip(),
+                "image_url":     (article.get("socialimage") or "").strip(),
+                "seen_date":     seen_date,
+            })
+
+        time.sleep(6)  # Respect rate limit: 1 call per 5 seconds, using 6 to be safe
+
+    return articles
+
+
 def fetch_and_ingest():
     now_ist = datetime.now(IST).strftime('%Y-%m-%d %I:%M:%S %p')
     print(f"\n[{now_ist}] Waking up Advanced Signal Ingestor (IST)...")
@@ -627,7 +693,74 @@ def fetch_and_ingest():
                             recent_hashes.append((incoming_h, datetime.now(timezone.utc)))
                     
         except Exception: pass
-        gc.collect() 
+        gc.collect()
+
+    # --- GDELT ingestion ---
+    print("\n[+] Starting GDELT ingestion...")
+    gdelt_articles = fetch_gdelt()
+    print(f"   -> Fetched {len(gdelt_articles)} GDELT articles across {len(GDELT_QUERIES)} states.")
+
+    for article in gdelt_articles:
+        try:
+            title       = article["title"]
+            link        = article["url"]
+            state_name  = article["state_context"]
+            source_name = article["source_title"]
+            image_url   = article["image_url"]
+
+            if not title or not link:
+                continue
+
+            nt  = _norm_title(title)
+            cu  = _canonical_url(link)
+            uid = f"url:{cu}" if cu else ""
+
+            if nt in seen_titles: continue
+            if uid and uid in seen_uids: continue
+            if cu and cu in seen_urls: continue
+
+            search_text = title.lower()
+            keywords = ["election", "poll", "vote", "congress", "bjp", "cpi", "tmc",
+                        "dmk", "rally", "clash", "eci", "candidate", "voter"]
+            if not any(k in search_text for k in keywords):
+                continue
+
+            print(f"-> [GDELT] Found: {title[:60]}...")
+            full_text, _, final_url = extract_article_data(link, "")
+            final_cu  = _canonical_url(final_url)
+            final_uid = f"url:{final_cu}" if final_cu else uid
+
+            # Simhash near-duplicate check (title-only — GDELT has no body snippet)
+            now = datetime.now(timezone.utc)
+            incoming_h = _simhash64(title)
+            if incoming_h:
+                window_start = now - timedelta(hours=12)
+                skip = False
+                for h, ts in recent_hashes[-600:]:
+                    if ts >= window_start and _hamming64(incoming_h, h) <= 3:
+                        skip = True
+                        break
+                if skip:
+                    continue
+
+            if final_uid and final_uid in seen_uids: continue
+            if final_cu and final_cu in seen_urls: continue
+
+            if len(full_text) > 50:
+                ok = analyze_and_insert(
+                    source_name, final_url or link, title,
+                    full_text, image_url, state_name, valid_c_ids,
+                )
+                if ok:
+                    seen_titles.add(nt)
+                    if final_cu:
+                        seen_urls.add(final_cu)
+                        seen_uids.add(f"url:{final_cu}")
+                    if final_uid:
+                        seen_uids.add(final_uid)
+                    if incoming_h:
+                        recent_hashes.append((incoming_h, now))
+        except Exception: pass
 
     generate_ai_briefing()
 
