@@ -20,6 +20,7 @@ Production (ECI numbers + booth every 20 min, all states on poll days):
     export TURNOUT_INGEST_MODE=grounded
     export VOTING_INGEST_INTERVAL_SEC=1200
     export ECI_SCRAPE_GRACE_MIN=12
+  export ECI_PRESS_PDF_URL="https://..."   optional — after 18:30 IST, fetch this ECI PDF once per cycle and upsert final turnout (see eci_press_release.py)
   First process start always hits ECINet once (empty cache). After that, Playwright runs again when the IST schedule
   fingerprint advances (intraday slots + grace / COP). Each cycle still runs Gemini booth_news per state.
   Important: use the long-running daemon for this split. Cron `python … --once` every 20m starts a fresh process each
@@ -29,6 +30,8 @@ Run under systemd with Restart=always, or cron @reboot + loop.
 Test:  python voting_day_ingestor.py --once
        python voting_day_ingestor.py --once --force-states Kerala Assam
        python voting_day_ingestor.py --once --force-eci   # clear ECI cache and re-scrape ECINet this run
+       python voting_day_ingestor.py --once --eci-press-date 2026-04-09 --force-states Kerala
+       python voting_day_ingestor.py --link "https://www.eci.gov.in/...pdf" --force-states Kerala Assam
 """
 from __future__ import annotations
 
@@ -897,11 +900,17 @@ def sleep_after_cycle_seconds(mode: str) -> int:
     return 3600
 
 
-def one_cycle(*, force_states: list[str] | None, bust_eci: bool = False) -> str:
+def one_cycle(
+    *,
+    force_states: list[str] | None,
+    bust_eci: bool = False,
+    eci_press_poll_day: date | None = None,
+) -> str:
     now = ist_now()
-    states = force_states if force_states else states_for_calendar(now.date())
+    cal_d = eci_press_poll_day if eci_press_poll_day is not None else now.date()
+    states = force_states if force_states else states_for_calendar(cal_d)
     if not states:
-        print(f"[i] No polling schedule for {now.date()} — idle.")
+        print(f"[i] No polling schedule for {cal_d} — idle.")
         return "IDLE"
 
     mode = run_mode(now)
@@ -910,9 +919,11 @@ def one_cycle(*, force_states: list[str] | None, bust_eci: bool = False) -> str:
 
     print(f"[i] IST {now.strftime('%Y-%m-%d %H:%M')} | mode={mode} | states={states}")
 
-    # Same-day ECI press release PDF on ecinet (IST date match) — overrides prior FINAL rows.
+    # Optional: direct ECI PDF URL (env) after polls close — overrides prior FINAL rows.
+    press_pdf = (os.getenv("ECI_PRESS_PDF_URL") or "").strip()
     if (
-        states
+        press_pdf
+        and states
         and gemini_client
         and os.getenv("ECI_SKIP_PRESS_RELEASE", "").strip().lower() not in ("1", "true", "yes")
         and minutes_since_midnight(now) >= TURNOUT_FINAL[0] * 60 + TURNOUT_FINAL[1]
@@ -921,12 +932,16 @@ def one_cycle(*, force_states: list[str] | None, bust_eci: bool = False) -> str:
             from eci_press_release import apply_eci_press_release_final_turnout
 
             n = apply_eci_press_release_final_turnout(
-                now, states, supabase=supabase, llm_json_fn=llm_json
+                now,
+                states,
+                supabase=supabase,
+                llm_json_fn=llm_json,
+                pdf_url=press_pdf,
             )
             if n:
-                print(f"   [i] ECI press release PDF — updated {n} state(s)")
+                print(f"   [i] ECI press PDF — updated {n} state(s)")
         except Exception as e:
-            print(f"   [!] ECI press release pass failed: {e}")
+            print(f"   [!] ECI press PDF pass failed: {e}")
 
     if mode == "IDLE":
         return mode
@@ -949,8 +964,32 @@ def main() -> None:
         action="store_true",
         help="With TURNOUT_NUMBERS_SOURCE=eci: clear ECI batch cache and re-scrape ECINet on the first cycle (daemon) or this run (--once)",
     )
+    ap.add_argument(
+        "--eci-press-date",
+        metavar="YYYY-MM-DD",
+        default=None,
+        help="Pick default states from PHASE_STATES for this IST calendar day. Use with --once or --link.",
+    )
+    ap.add_argument(
+        "--link",
+        metavar="URL",
+        default=None,
+        help="ECI (or other) PDF URL: Playwright download + Gemini turnout extract + Supabase upsert. "
+        "Use with --force-states or --eci-press-date on a PHASE_STATES day. Ignores the 18:30 daemon gate.",
+    )
     args = ap.parse_args()
     force_states = args.force_states if args.force_states else None
+
+    eci_press_poll_day: date | None = None
+    if args.eci_press_date:
+        try:
+            eci_press_poll_day = datetime.strptime(args.eci_press_date.strip(), "%Y-%m-%d").date()
+        except ValueError:
+            print("CRITICAL: --eci-press-date must be YYYY-MM-DD.")
+            sys.exit(1)
+        if not args.once and not args.link:
+            print("CRITICAL: --eci-press-date requires --once or --link.")
+            sys.exit(1)
 
     print("=== DHARMA-OSINT voting_day_ingestor (IST) ===")
     if not supabase:
@@ -960,8 +999,42 @@ def main() -> None:
         print("CRITICAL: GEMINI_API_KEY missing.")
         sys.exit(1)
 
+    if args.link:
+        pdf_link = args.link.strip()
+        if not pdf_link.lower().startswith(("http://", "https://")):
+            print("CRITICAL: --link must be an http(s) URL.")
+            sys.exit(1)
+        now = ist_now()
+        cal_d = eci_press_poll_day if eci_press_poll_day is not None else now.date()
+        st = list(force_states) if force_states else states_for_calendar(cal_d)
+        if not st:
+            print(
+                "CRITICAL: No states — use --force-states Kerala Assam (etc.) or --eci-press-date on a PHASE_STATES day."
+            )
+            sys.exit(1)
+        print(f"[i] ECI press PDF (--link), states={st}")
+        try:
+            from eci_press_release import apply_eci_press_release_final_turnout
+
+            n = apply_eci_press_release_final_turnout(
+                now,
+                st,
+                supabase=supabase,
+                llm_json_fn=llm_json,
+                pdf_url=pdf_link,
+            )
+            print(f"[i] ECI press PDF pass finished — updated {n} state(s).")
+        except Exception as e:
+            print(f"[!] ECI press PDF pass failed: {e}")
+            sys.exit(1)
+        return
+
     if args.once:
-        one_cycle(force_states=force_states, bust_eci=args.force_eci)
+        one_cycle(
+            force_states=force_states,
+            bust_eci=args.force_eci,
+            eci_press_poll_day=eci_press_poll_day,
+        )
         return
 
     force_eci_next = args.force_eci

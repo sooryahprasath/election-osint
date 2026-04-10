@@ -444,7 +444,6 @@ Hard rules:
         tools=[tool],
         temperature=0.15,
         max_output_tokens=_grounded_max_output_tokens(),
-        thinking_config=types.ThinkingConfig(thinking_budget=0),
     )
 
     try:
@@ -540,7 +539,6 @@ Hard rules:
         tools=[tool],
         temperature=0.15,
         max_output_tokens=_grounded_max_output_tokens(),
-        thinking_config=types.ThinkingConfig(thinking_budget=0),
     )
 
     try:

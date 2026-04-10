@@ -63,8 +63,8 @@ ECI_STATE_CONFIG = [
     {"name": "Kerala", "code": "S11", "prefix": "KER", "max_pages": 89},
     {"name": "Assam", "code": "S03", "prefix": "ASM", "max_pages": 73},
     {"name": "Puducherry", "code": "U07", "prefix": "PY", "max_pages": 30},
-    # {"name": "Tamil Nadu", "code": "S??", "prefix": "TN", "max_pages": ???},
-    # {"name": "West Bengal", "code": "S??", "prefix": "WB", "max_pages": ???},
+    # {"name": "Tamil Nadu", "code": "S22", "prefix": "TN", "max_pages": ???},
+    # {"name": "West Bengal", "code": "S25", "prefix": "WB", "max_pages": ???},
 ]
 
 MYNETA_CONFIG = [

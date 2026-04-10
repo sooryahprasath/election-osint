@@ -1,32 +1,46 @@
 """
-ECI press releases (ECINet → eci.gov.in API) — same-calendar-day (IST) PDF match + final turnout upsert.
+ECI final-turnout from a **direct PDF URL** (Playwright fetch + pypdf + Gemini + Supabase).
 
-The React app on https://ecinet.eci.gov.in/home/eciUpdates calls:
-  GET https://www.eci.gov.in/eci-backend/public/api/get-press-release?days=<enc>&page=<enc>&search=<enc>
-Response shape (observed in bundle 9880.*.chunk.js):
-  data.results.data[] → document_title, date_of_creation, document_attachments[0].record_location (PDF URL)
+No press listing, API, or DOM scraping — you provide the PDF link (CLI `--link` or env `ECI_PRESS_PDF_URL`).
 
-We rely on Playwright so the page runs the same client-side encryption as the SPA and triggers the request.
-Selection priority: **IST date of press release == poll calendar date**; title keywords are optional tie-breakers only.
+Manual:
+  python voting_day_ingestor.py --link "https://www.eci.gov.in/.../download?..." --force-states Kerala Assam Puducherry
+
+Daemon (optional, after 18:30 IST gate): set `ECI_PRESS_PDF_URL` to the same kind of URL; clear or rotate when obsolete.
+
+Env:
+  ECI_PRESS_PDF_URL — PDF URL when not passing CLI `--link`
+  ECI_PRESS_DOC_TITLE — optional short label for DB booth_news text
+  ECI_PRESS_TIMEOUT_MS, ECI_PRESS_DIRECT_WARM_MS, ECI_PRESS_HEADLESS, ECI_PRESS_CHANNEL, ECI_PRESS_DEBUG
+  ECI_SKIP_PRESS_RELEASE=1 — disable the daemon pass in voting_day_ingestor
 """
 from __future__ import annotations
 
 import io
 import json
 import os
-import re
-from datetime import date, datetime
+from contextlib import contextmanager
+from datetime import datetime
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
-import requests
 from zoneinfo import ZoneInfo
 
 IST = ZoneInfo("Asia/Kolkata")
 ECINET_UPDATES_URL = "https://ecinet.eci.gov.in/home/eciUpdates"
-PRESS_API_SUBSTRING = "get-press-release"
 
-# Optional: comma-separated state names to limit LLM extraction (default: all PHASE_STATES for that day)
+_ECI_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+)
+
+_ECI_BINARY_HEADERS = {
+    "Referer": "https://www.eci.gov.in/",
+    "Origin": "https://www.eci.gov.in",
+    "Accept": "application/pdf,application/octet-stream,*/*",
+    "User-Agent": _ECI_UA,
+}
+
 _STATE_ALIASES = {
     "tamil nadu": "Tamil Nadu",
     "west bengal": "West Bengal",
@@ -37,117 +51,61 @@ _STATE_ALIASES = {
 }
 
 
-def _parse_api_date(s: str) -> date | None:
-    s = (s or "").strip()
-    if not s:
-        return None
-    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d", "%d-%b-%Y", "%d %b %Y"):
-        try:
-            return datetime.strptime(s[:20], fmt).date()
-        except ValueError:
-            continue
-    m = re.search(r"(\d{4}-\d{2}-\d{2})", s)
-    if m:
-        try:
-            return datetime.strptime(m.group(1), "%Y-%m-%d").date()
-        except ValueError:
-            pass
-    return None
-
-
-def _fetch_press_release_payload_playwright(*, timeout_ms: int = 120_000) -> dict[str, Any] | None:
+@contextmanager
+def _eci_press_playwright(timeout_ms: int):
     from playwright.sync_api import sync_playwright
 
-    captured: list[dict[str, Any]] = []
-
-    def on_response(resp):
-        try:
-            if PRESS_API_SUBSTRING not in resp.url:
-                return
-            if resp.status != 200:
-                return
-            captured.append(resp.json())
-        except Exception:
-            pass
+    headless = (os.getenv("ECI_PRESS_HEADLESS") or os.getenv("TURNOUT_ECI_HEADLESS") or "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+    )
+    channel = (os.getenv("ECI_PRESS_CHANNEL") or "").strip() or None
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        page.on("response", on_response)
-        page.goto(ECINET_UPDATES_URL, wait_until="domcontentloaded", timeout=timeout_ms)
-        page.wait_for_timeout(8000)
-        if not captured:
-            page.reload(wait_until="networkidle", timeout=timeout_ms)
-            page.wait_for_timeout(12000)
-        browser.close()
-
-    for payload in reversed(captured):
-        if isinstance(payload, dict) and _normalize_items(payload):
-            return payload
-    return captured[-1] if captured else None
-
-
-def _normalize_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    try:
-        inner = payload.get("results")
-        if isinstance(inner, dict):
-            data = inner.get("data") or []
-        elif isinstance(inner, list):
-            data = inner
-        else:
-            data = payload.get("data") or []
-        return [x for x in data if isinstance(x, dict)]
-    except Exception:
-        return []
+        launch_args: list[str] = []
+        if headless:
+            launch_args = [
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+            ]
+        launch_kw: dict[str, Any] = {"headless": headless, "args": launch_args}
+        if channel:
+            launch_kw["channel"] = channel
+        browser = p.chromium.launch(**launch_kw)
+        context = browser.new_context(
+            user_agent=_ECI_UA,
+            locale="en-IN",
+            viewport={"width": 1280, "height": 900},
+        )
+        if headless:
+            context.add_init_script(
+                "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
+            )
+        page = context.new_page()
+        page.set_default_timeout(min(timeout_ms, 90_000))
+        try:
+            yield context, page
+        finally:
+            browser.close()
 
 
-def _same_ist_day(item_date: str, poll_d: date) -> bool:
-    d = _parse_api_date(item_date)
-    return d == poll_d if d else False
-
-
-def _pick_pdf_for_poll_day(items: list[dict[str, Any]], poll_d: date) -> tuple[str, str, str] | None:
-    """
-    Returns (pdf_url, title, raw_date_str) for the best same-day match.
-    If multiple same-day PDFs, prefer one whose title mentions turnout / assembly / election (weak tie-break).
-    """
-    cands: list[tuple[int, dict[str, Any]]] = []
-    for it in items:
-        raw_date = str(it.get("date_of_creation") or "").strip()
-        if not _same_ist_day(raw_date, poll_d):
-            continue
-        atts = it.get("document_attachments") or []
-        if not atts or not isinstance(atts, list):
-            continue
-        loc = atts[0].get("record_location") if isinstance(atts[0], dict) else None
-        pdf_url = str(loc or "").strip()
-        if not pdf_url.lower().endswith(".pdf") and "/pdf" not in pdf_url.lower():
-            # still allow CDN paths without .pdf suffix
-            if "pdf" not in pdf_url.lower():
-                continue
-        title = str(it.get("document_title") or "").strip()
-        score = 0
-        tl = title.lower()
-        for kw in ("turnout", "poll", "assembly", "legislative", "election", "voter", "phase"):
-            if kw in tl:
-                score += 1
-        cands.append((score, {"pdf_url": pdf_url, "title": title, "raw_date": raw_date}))
-    if not cands:
-        return None
-    cands.sort(key=lambda x: x[0], reverse=True)
-    best = cands[0][1]
-    return (best["pdf_url"], best["title"], best["raw_date"])
-
-
-def _download_pdf_text(url: str, timeout: int = 120) -> str:
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; DHARMA-OSINT/1.0; +https://example.invalid)"}
-    r = requests.get(url, headers=headers, timeout=timeout)
-    r.raise_for_status()
+def _download_pdf_text_via_context(context: Any, url: str, *, timeout_ms: int) -> str:
+    resp = context.request.get(url, headers=dict(_ECI_BINARY_HEADERS), timeout=timeout_ms)
+    if resp.status != 200:
+        snippet = ""
+        try:
+            snippet = resp.text()[:200]
+        except Exception:
+            pass
+        raise RuntimeError(f"PDF download HTTP {resp.status}: {snippet}")
+    data = resp.body()
     try:
         from pypdf import PdfReader
     except ImportError:
         raise RuntimeError("pypdf is required — pip install pypdf")
-    reader = PdfReader(io.BytesIO(r.content))
+    reader = PdfReader(io.BytesIO(data))
     parts: list[str] = []
     for pg in reader.pages[:30]:
         try:
@@ -165,8 +123,6 @@ def _llm_turnout_from_press_text(
     *,
     llm_json: Any,
 ) -> dict[str, dict[str, float]]:
-    """Returns { 'Kerala': {'turnout_min': x, 'turnout_max': y}, ... }"""
-
     states_json = json.dumps(expected_states)
     snippet = text[:24_000]
     prompt = f"""You read the plain text extracted from an Election Commission of India (ECI) press release PDF.
@@ -291,43 +247,61 @@ def apply_eci_press_release_final_turnout(
     *,
     supabase: Any,
     llm_json_fn: Any,
+    pdf_url: str | None = None,
+    doc_title: str | None = None,
 ) -> int:
     """
-    If a press release PDF dated **today IST** (poll calendar day) exists, extract turnout for `states`
-    and upsert rows (overriding prior FINAL).
+    Download ``pdf_url`` (or ``ECI_PRESS_PDF_URL`` env), extract text, LLM-parse turnout for ``states``, upsert.
+
     Returns number of states updated.
     """
     if not llm_json_fn:
         return 0
-    poll_d = now.astimezone(IST).date()
+    url = (pdf_url or os.getenv("ECI_PRESS_PDF_URL") or "").strip()
+    if not url:
+        print("   [i] ECI press PDF: no URL — set --link or ECI_PRESS_PDF_URL.")
+        return 0
+    if not url.lower().startswith(("http://", "https://")):
+        print(f"   [!] ECI press PDF: invalid URL scheme: {url[:80]!r}")
+        return 0
+
+    title = ((doc_title or os.getenv("ECI_PRESS_DOC_TITLE") or "").strip() or url)[:500]
     states_set = {s.strip() for s in states if isinstance(s, str) and s.strip()}
     if not states_set:
         return 0
 
-    payload = _fetch_press_release_payload_playwright()
-    if not payload:
-        print("   [i] ECI press release: no API payload captured (SPA/API).")
-        return 0
-    items = _normalize_items(payload)
-    picked = _pick_pdf_for_poll_day(items, poll_d)
-    if not picked:
-        print(f"   [i] ECI press release: no same-day ({poll_d}) PDF in {len(items)} listing row(s).")
-        return 0
-    pdf_url, title, raw_d = picked
-    if not urlparse(pdf_url).netloc:
-        pdf_url = urljoin("https://www.eci.gov.in/", pdf_url)
+    timeout_ms = int((os.getenv("ECI_PRESS_TIMEOUT_MS") or "120000").strip() or "120000")
+    debug = (os.getenv("ECI_PRESS_DEBUG") or "").strip().lower() in ("1", "true", "yes")
+    warm_ms = int((os.getenv("ECI_PRESS_DIRECT_WARM_MS") or "2000").strip() or "2000")
 
-    try:
-        text = _download_pdf_text(pdf_url)
-    except Exception as e:
-        print(f"   [!] ECI press release PDF fetch/extract failed: {e}")
-        return 0
+    pdf_url_resolved = url
+    if not urlparse(pdf_url_resolved).netloc:
+        pdf_url_resolved = urljoin("https://www.eci.gov.in/", pdf_url_resolved)
+
+    with _eci_press_playwright(timeout_ms) as (context, page):
+        if debug:
+            print(f"      [ECI_PRESS_DEBUG] PDF: {pdf_url_resolved[:160]}…")
+        page.goto(ECINET_UPDATES_URL, wait_until="domcontentloaded", timeout=timeout_ms)
+        page.wait_for_timeout(warm_ms)
+        try:
+            text = _download_pdf_text_via_context(context, pdf_url_resolved, timeout_ms=timeout_ms)
+        except Exception as e:
+            print(f"   [!] ECI press PDF fetch/extract failed: {e}")
+            return 0
+
     if len(text.strip()) < 80:
-        print("   [!] ECI press release: extracted text too short — skipping LLM.")
+        print("   [!] ECI press PDF: extracted text too short — skipping LLM.")
         return 0
 
     extracted = _llm_turnout_from_press_text(text, sorted(states_set), llm_json=llm_json_fn)
-    slot = f"FINAL · ECI press release · {now.astimezone(IST).strftime('%Y-%m-%d %H:%M')} IST"
+    if not extracted:
+        print(
+            f"   [i] ECI press PDF: LLM returned no turnout rows for states {sorted(states_set)} "
+            f"— check PDF or --force-states."
+        )
+
+    run_ts = now.astimezone(IST).strftime("%Y-%m-%d %H:%M")
+    slot = f"FINAL · ECI press PDF · {run_ts} IST"
     n = 0
     for raw_name, nums in extracted.items():
         canon = _canonical_state(raw_name, states_set)
@@ -338,7 +312,7 @@ def apply_eci_press_release_final_turnout(
             canon,
             nums["turnout_min"],
             nums["turnout_max"],
-            pdf_url,
+            pdf_url_resolved,
             title,
             slot,
         )
