@@ -1,16 +1,10 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChevronUp, ChevronDown, Activity, BarChart3, Clock, PieChart, CheckCircle2, ExternalLink, X, Info, RefreshCw } from "lucide-react";
+import { ChevronUp, ChevronDown, Activity, BarChart3, Clock, PieChart, CheckCircle2, X, Info, RefreshCw } from "lucide-react";
 import { useLiveData } from "@/lib/context/LiveDataContext";
 import { ELECTION_DATES, isExitPollEmbargoActive } from "@/lib/utils/countdown";
 import { getWarRoomPhase, istMinutesSinceMidnight, sameISTCalendarDay } from "@/lib/utils/warRoomSchedule";
-import {
-  articleHostnameLabel,
-  articleLinkUiLabel,
-  contextualSearchUrl,
-  safeNewsArticleHref,
-} from "@/lib/utils/newsUrls";
 import LiveElectionTimeline from "@/components/warroom/LiveElectionTimeline";
 
 const MAX_NOTES_PER_STATE = 4;
@@ -60,6 +54,32 @@ function filterRenderableBoothNews(raw: unknown): Record<string, unknown>[] {
     if (text.length < 4) return false;
     return text.length >= 8;
   }) as Record<string, unknown>[];
+}
+
+/** Booth / field lines only — no source-link rows, methodology, ECI PDF blurbs, or wire turnout claims. */
+function filterBoothFieldNewsOnly(raw: unknown): Record<string, unknown>[] {
+  const base = filterRenderableBoothNews(raw);
+  return base.filter((n) => {
+    const typ = String((n as Record<string, unknown>).type ?? "");
+    if (typ === "citation" || typ === "methodology" || typ === "eci_encore" || typ === "turnout_claim") {
+      return false;
+    }
+    return true;
+  });
+}
+
+/** True when `now` (IST) is a scheduled poll calendar day for this state (mirrors active phase logic). */
+function isVotingCalendarDayForState(now: Date, state: string): boolean {
+  if (["Kerala", "Assam", "Puducherry"].includes(state)) {
+    return sameISTCalendarDay(now, ELECTION_DATES.phase1);
+  }
+  if (state === "Tamil Nadu") {
+    return sameISTCalendarDay(now, ELECTION_DATES.phase2);
+  }
+  if (state === "West Bengal") {
+    return sameISTCalendarDay(now, ELECTION_DATES.phase2) || sameISTCalendarDay(now, ELECTION_DATES.phase2b);
+  }
+  return false;
 }
 
 export default function VotingHud({
@@ -397,8 +417,8 @@ export default function VotingHud({
                       <span
                         className={`shrink-0 rounded-full border px-2.5 py-1 font-mono text-[9px] font-semibold uppercase tracking-wide ${
                           isOfficial
-                            ? "border-emerald-300 bg-emerald-100 text-emerald-950 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-100"
-                            : "border-sky-200/80 bg-sky-50 !text-neutral-950 dark:border-sky-700 dark:bg-sky-900 dark:!text-sky-100"
+                            ? "border-emerald-900 bg-emerald-800 text-white shadow-sm dark:border-emerald-400/50 dark:bg-emerald-700 dark:text-white"
+                            : "border-sky-300 bg-sky-100 text-sky-950 dark:border-sky-600 dark:bg-sky-950 dark:text-sky-50"
                         }`}
                       >
                         {isOfficial ? "ECI" : phase}
@@ -415,15 +435,17 @@ export default function VotingHud({
                             <span
                               className={`shrink-0 rounded-md border px-1.5 py-0.5 font-mono text-[9px] font-bold ${
                                 isOfficial
-                                  ? "border-emerald-300 bg-emerald-100 text-emerald-950 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-100"
-                                  : "border-zinc-300 bg-zinc-100 !text-neutral-950 dark:border-zinc-600 dark:bg-zinc-900 dark:!text-zinc-100"
+                                  ? "border-emerald-900 bg-emerald-800 text-white dark:border-emerald-400/50 dark:bg-emerald-700 dark:text-white"
+                                  : "border-zinc-400 bg-zinc-200 text-zinc-950 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
                               }`}
                               title={isOfficial ? "Official ECI source" : "Not official ECI — web snapshot"}
                             >
                               {isOfficial ? "ECI" : "WEB"}
                             </span>
                           </div>
-                          <span className="font-mono text-[10px] font-semibold text-[var(--text-secondary)]">TURNOUT</span>
+                          <span className="font-mono text-[10px] font-semibold text-neutral-700 dark:text-[var(--text-secondary)]">
+                            TURNOUT
+                          </span>
                         </div>
                         <p className="mt-1.5 text-[11px] leading-snug text-[var(--text-secondary)]">
                           Updated {rel || "—"} · {isOfficial ? "official · ECI" : "unofficial · web snapshot"}
@@ -467,10 +489,11 @@ export default function VotingHud({
                       id="voting-notes-heading"
                       className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-secondary)]"
                     >
-                      Notes & sources
+                      Booth news
                     </h2>
                     <span className="text-[11px] text-[var(--text-muted)]">
-                      Up to {MAX_NOTES_PER_STATE} per state · tap a link to open
+                      Field reports for each state’s poll day (IST) only · up to {MAX_NOTES_PER_STATE} per state · no
+                      outbound links
                     </span>
                   </div>
                 </div>
@@ -542,39 +565,35 @@ export default function VotingHud({
                       const states = notesState === "ALL" ? activeStates : [notesState];
                       const flat: { st: string; n: Record<string, unknown> }[] = [];
                       for (const st of states) {
+                        if (!isVotingCalendarDayForState(now, st)) continue;
                         const row = latestTurnoutByState.get(st);
-                        const bullets = filterRenderableBoothNews(row?.booth_news);
+                        const bullets = filterBoothFieldNewsOnly(row?.booth_news);
                         for (const n of bullets) flat.push({ st, n });
                       }
                       const pick = flat.slice(0, 2);
                       return pick.length > 0 ? (
-                        pick.map((x, idx) => {
-                          const isMeta = x.n.type === "methodology";
-                          const accent =
-                            isMeta ? "bg-zinc-400" : x.n.type === "citation" ? "bg-sky-500" : "bg-amber-500";
-                          return (
-                            <li
-                              key={idx}
-                              className="flex overflow-hidden rounded-lg border border-[color:var(--border)] bg-[var(--surface-1)] shadow-sm dark:shadow-black/20"
-                            >
-                              <span className={`w-1 shrink-0 ${accent}`} aria-hidden />
-                              <div className="min-w-0 flex-1 px-2.5 py-2">
-                                <p className="font-mono text-[9px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-                                  {x.st}
-                                </p>
-                                <p
-                                  className={`mt-0.5 text-[12px] leading-snug ${
-                                    isMeta ? "text-[var(--text-secondary)] italic" : "text-[var(--text-primary)]"
-                                  }`}
-                                >
-                                  {String(x.n?.text ?? "")}
-                                </p>
-                              </div>
-                            </li>
-                          );
-                        })
+                        pick.map((x, idx) => (
+                          <li
+                            key={idx}
+                            className="flex overflow-hidden rounded-lg border border-[color:var(--border)] bg-[var(--surface-1)] shadow-sm dark:shadow-black/20"
+                          >
+                            <span className="w-1 shrink-0 bg-amber-500" aria-hidden />
+                            <div className="min-w-0 flex-1 px-2.5 py-2">
+                              <p className="font-mono text-[9px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                                {x.st}
+                              </p>
+                              <p className="mt-0.5 text-[12px] leading-snug text-[var(--text-primary)]">
+                                {String(x.n?.text ?? "")}
+                              </p>
+                            </div>
+                          </li>
+                        ))
                       ) : (
-                        <li className="text-sm text-[var(--text-muted)]">No notes yet.</li>
+                        <li className="text-sm text-[var(--text-muted)]">
+                          {activeStates.some((s) => isVotingCalendarDayForState(now, s))
+                            ? "No booth field reports yet."
+                            : "Booth news is shown on each state’s poll day (IST) only."}
+                        </li>
                       );
                     })()}
                   </ul>
@@ -590,7 +609,8 @@ export default function VotingHud({
                 <div className="mt-4 space-y-8">
                   {(notesState === "ALL" ? activeStates : [notesState]).map((st) => {
                     const row = latestTurnoutByState.get(st);
-                    const bullets = filterRenderableBoothNews(row?.booth_news);
+                    const onPollDay = isVotingCalendarDayForState(now, st);
+                    const bullets = onPollDay ? filterBoothFieldNewsOnly(row?.booth_news) : [];
                     return (
                       <div key={st}>
                         <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-[color:var(--border)]/80 pb-2">
@@ -606,91 +626,29 @@ export default function VotingHud({
                               : "Awaiting data"}
                           </span>
                         </div>
-                        {bullets.length > 0 ? (
+                        {!onPollDay ? (
+                          <p className="text-sm text-[var(--text-secondary)]">
+                            Booth field news is shown on this state’s poll day (IST) only.
+                          </p>
+                        ) : bullets.length > 0 ? (
                           <ul className="flex flex-col gap-3">
-                            {bullets.slice(0, MAX_NOTES_PER_STATE).map((n: Record<string, unknown>, idx: number) => {
-                              const isMeta = n.type === "methodology";
-                              const isCit = n.type === "citation";
-                              const isEci = n.type === "eci_encore";
-                              const srcRaw = typeof n.source === "string" ? n.source.trim() : "";
-                              const hasHttpSource = /^https?:\/\//i.test(srcRaw);
-                              const noteText = String(n.text || "").trim();
-                              const fallbackQ = `${st} assembly election 2026 ${noteText}`;
-                              const primaryHref =
-                                !isMeta && hasHttpSource ? safeNewsArticleHref(srcRaw, fallbackQ) : "";
-                              const searchHref =
-                                !isMeta && !hasHttpSource && noteText.length >= 12
-                                  ? contextualSearchUrl(st, noteText)
-                                  : "";
-                              const href = primaryHref || searchHref;
-                              const isSearchOnly = Boolean(searchHref && !primaryHref);
-                              const isGoogleSearch =
-                                !!href &&
-                                href.includes("google.com/search") &&
-                                href.includes("q=");
-                              const host = href ? articleHostnameLabel(href) : "";
-                              const linkSubtitle = isSearchOnly || isGoogleSearch
-                                ? "Search related coverage"
-                                : host
-                                  ? host
-                                  : href
-                                    ? articleLinkUiLabel(href)
-                                    : "";
-                              const accent = isMeta
-                                ? "bg-zinc-400"
-                                : isEci
-                                  ? "bg-emerald-600"
-                                  : isCit
-                                    ? "bg-sky-500"
-                                    : "bg-amber-500";
-
-                              return (
-                                <li
-                                  key={idx}
-                                  className="flex overflow-hidden rounded-xl border border-[color:var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(15,23,42,0.06)] dark:bg-[var(--surface-1)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.35)]"
-                                >
-                                  <span className={`w-1 shrink-0 ${accent}`} aria-hidden />
-                                  <div className="min-w-0 flex-1 px-3 py-3 md:px-3.5 md:py-3.5">
-                                    <p
-                                      className={`text-[13px] leading-[1.45] md:text-sm md:leading-relaxed ${
-                                        isMeta
-                                          ? "text-[var(--text-secondary)]"
-                                          : "text-[var(--text-primary)]"
-                                      }`}
-                                    >
-                                      {String(n.text ?? "")}
-                                    </p>
-                                    {href ? (
-                                      <div className="mt-3 border-t border-[color:var(--border)]/70 pt-2.5">
-                                        <p className="mb-1 font-mono text-[9px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                                          Source
-                                        </p>
-                                        <a
-                                          href={href}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="inline-flex min-h-11 w-full max-w-full items-start gap-2 rounded-lg px-1 py-1.5 text-left text-[13px] font-medium text-sky-700 -outline-offset-2 hover:bg-sky-500/[0.08] dark:text-sky-400 md:min-h-0 md:inline-flex md:w-auto md:items-center"
-                                        >
-                                          <ExternalLink
-                                            className="mt-0.5 h-4 w-4 shrink-0 opacity-85 md:mt-0"
-                                            aria-hidden
-                                          />
-                                          <span className="min-w-0 break-words leading-snug">{linkSubtitle}</span>
-                                        </a>
-                                      </div>
-                                    ) : !isMeta ? (
-                                      <p className="mt-2 border-t border-[color:var(--border)]/70 pt-2 font-mono text-[10px] text-[var(--text-muted)]">
-                                        No source URL on file for this line.
-                                      </p>
-                                    ) : null}
-                                  </div>
-                                </li>
-                              );
-                            })}
+                            {bullets.slice(0, MAX_NOTES_PER_STATE).map((n: Record<string, unknown>, idx: number) => (
+                              <li
+                                key={idx}
+                                className="flex overflow-hidden rounded-xl border border-[color:var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(15,23,42,0.06)] dark:bg-[var(--surface-1)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.35)]"
+                              >
+                                <span className="w-1 shrink-0 bg-amber-500" aria-hidden />
+                                <div className="min-w-0 flex-1 px-3 py-3 md:px-3.5 md:py-3.5">
+                                  <p className="text-[13px] leading-[1.45] text-[var(--text-primary)] md:text-sm md:leading-relaxed">
+                                    {String(n.text ?? "")}
+                                  </p>
+                                </div>
+                              </li>
+                            ))}
                           </ul>
                         ) : row ? (
                           <p className="text-sm text-[var(--text-secondary)]">
-                            No readable notes after last sync — use REFRESH or wait for the worker.
+                            No booth field reports after last sync — use REFRESH or wait for the worker.
                           </p>
                         ) : (
                           <p className="text-sm text-[var(--text-secondary)]">Awaiting first ingest cycle…</p>

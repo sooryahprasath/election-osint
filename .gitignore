@@ -24,6 +24,9 @@
 .DS_Store
 *.pem
 
+# Local ECI site probes / downloaded bundles (not part of the app)
+.eci*
+
 # debug
 npm-debug.log*
 yarn-debug.log*

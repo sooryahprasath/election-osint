@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Wifi, MapPin, Users, Signal, Settings2, X, Clock, ShieldAlert } from "lucide-react";
+import { Wifi, MapPin, Users, Signal, Settings2, X, Clock } from "lucide-react";
 
 const GithubIcon = ({ className }: { className?: string }) => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -16,7 +16,7 @@ import { ELECTION_DATES } from "@/lib/utils/countdown";
 const IST = (iso: string) => new Date(iso);
 
 export default function BottomBar() {
-  const { constituencies, signals, candidates, setSimulatedDate, operationMode, setOperationMode, simulatedDate } = useLiveData();
+  const { constituencies, signals, candidates, setSimulatedDate, setOperationMode, simulatedDate } = useLiveData();
   const [showDevMenu, setShowDevMenu] = useState(false);
 
   const ENABLE_DEV_MENU = process.env.NEXT_PUBLIC_ENABLE_DEV_MENU === "true";
@@ -34,11 +34,6 @@ export default function BottomBar() {
             <Wifi className="h-3 w-3 text-[#16a34a]" />
             <span className="text-[#16a34a]">SYS.ONLINE</span>
           </div>
-          {operationMode !== "PRE-POLL" && (
-            <div className="flex items-center gap-1 px-1.5 py-0.5 bg-[#dc2626] text-white rounded">
-              <ShieldAlert className="h-3 w-3" /> MODE: {operationMode}
-            </div>
-          )}
         </div>
 
         <div className="hidden md:flex items-center gap-5">
