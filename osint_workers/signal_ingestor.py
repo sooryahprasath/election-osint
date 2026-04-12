@@ -10,7 +10,7 @@ import gc
 import urllib.parse
 import re
 import hashlib
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from google import genai
 from googleapiclient.discovery import build
 from dotenv import load_dotenv
@@ -42,7 +42,122 @@ SUPABASE_KEY = SUPABASE_SERVICE_ROLE_KEY or SUPABASE_ANON_KEY
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 
-gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+
+def _parse_int_env(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+# LLM usage caps (0 = unlimited). Counts reset: per-run counter each ingest cycle; daily at midnight IST.
+SIGNAL_LLM_MAX_PER_RUN = _parse_int_env("SIGNAL_LLM_MAX_PER_RUN", 50)
+SIGNAL_LLM_MAX_PER_DAY = _parse_int_env("SIGNAL_LLM_MAX_PER_DAY", 800)
+# Briefing: 0 = run every ingest cycle; else minimum minutes between Gemini briefing calls.
+SIGNAL_BRIEFING_INTERVAL_MINUTES = _parse_int_env("SIGNAL_BRIEFING_INTERVAL_MINUTES", 360)
+SIGNAL_BRIEFING_MAX_SIGNALS = _parse_int_env("SIGNAL_BRIEFING_MAX_SIGNALS", 12)
+SIGNAL_GEMINI_MODEL = os.getenv("SIGNAL_GEMINI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
+SIGNAL_DISABLE_KEYWORD_GATE = os.getenv("SIGNAL_DISABLE_KEYWORD_GATE", "").lower() in ("1", "true", "yes")
+SIGNAL_KEYWORD_EXTRA = [
+    x.strip().lower()
+    for x in (os.getenv("SIGNAL_KEYWORD_EXTRA") or "").split(",")
+    if x.strip()
+]
+
+_BASE_SIGNAL_KEYWORDS = frozenset(
+    {
+        "election",
+        "poll",
+        "vote",
+        "congress",
+        "bjp",
+        "cpi",
+        "tmc",
+        "dmk",
+        "rally",
+        "clash",
+        "eci",
+        "candidate",
+        "voter",
+        "evm",
+        "booth",
+        "mcc",
+        "counting",
+        "ballot",
+        "nomination",
+        "affidavit",
+        "turnout",
+        "tamil nadu",
+        "kerala",
+        "west bengal",
+        "assam",
+        "puducherry",
+        "bengal",
+        "phase",
+    }
+)
+SIGNAL_KEYWORDS = _BASE_SIGNAL_KEYWORDS.union(SIGNAL_KEYWORD_EXTRA)
+
+_article_llm_run_count = 0
+_llm_day_total = 0
+_llm_day_key: date | None = None
+_last_briefing_ist: datetime | None = None
+
+
+def _llm_refresh_day() -> None:
+    global _llm_day_total, _llm_day_key
+    today = datetime.now(IST).date()
+    if _llm_day_key != today:
+        _llm_day_key = today
+        _llm_day_total = 0
+
+
+def _llm_can_article() -> bool:
+    _llm_refresh_day()
+    if SIGNAL_LLM_MAX_PER_RUN > 0 and _article_llm_run_count >= SIGNAL_LLM_MAX_PER_RUN:
+        return False
+    if SIGNAL_LLM_MAX_PER_DAY > 0 and _llm_day_total >= SIGNAL_LLM_MAX_PER_DAY:
+        return False
+    return True
+
+
+def _llm_can_briefing() -> bool:
+    _llm_refresh_day()
+    if SIGNAL_LLM_MAX_PER_DAY > 0 and _llm_day_total >= SIGNAL_LLM_MAX_PER_DAY:
+        return False
+    return True
+
+
+def _llm_record_article() -> None:
+    global _article_llm_run_count, _llm_day_total
+    _article_llm_run_count += 1
+    _llm_day_total += 1
+
+
+def _llm_record_briefing() -> None:
+    global _llm_day_total
+    _llm_day_total += 1
+
+
+def _election_keyword_hit(text: str) -> bool:
+    if SIGNAL_DISABLE_KEYWORD_GATE:
+        return True
+    blob = (text or "").lower()
+    return any(k in blob for k in SIGNAL_KEYWORDS)
+
+
+def _should_run_briefing_now() -> bool:
+    global _last_briefing_ist
+    if SIGNAL_BRIEFING_INTERVAL_MINUTES <= 0:
+        return True
+    now = datetime.now(IST)
+    if _last_briefing_ist is None:
+        return True
+    elapsed = (now - _last_briefing_ist).total_seconds() / 60.0
+    return elapsed >= float(SIGNAL_BRIEFING_INTERVAL_MINUTES)
+
+
+gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY) if YOUTUBE_API_KEY else None
 
 try:
@@ -350,11 +465,26 @@ def fetch_youtube_video(query):
     return ""
 
 def analyze_and_insert(source_title, source_url, original_title, full_text, image_url, state_context, valid_c_ids):
+    if not gemini_client:
+        print("   [llm] skip: GEMINI_API_KEY / client missing")
+        return False
+    if not _llm_can_article():
+        print(
+            f"   [llm-cap] skip article LLM "
+            f"(run {_article_llm_run_count}/{SIGNAL_LLM_MAX_PER_RUN or '∞'}, "
+            f"day {_llm_day_total}/{SIGNAL_LLM_MAX_PER_DAY or '∞'})"
+        )
+        return False
+
     election_context = get_election_context()
     # Token hygiene: keep input tight and deterministic.
     full_text = (full_text or "").strip()[:1400]
     original_title = (original_title or "").strip()[:220]
-    
+
+    if not _election_keyword_hit(f"{original_title} {full_text}"):
+        print(f"   [kw-gate] skip (no election keywords in title/body): {original_title[:56]!r}...")
+        return False
+
     prompt = (
         "You are a strictly accurate Indian election OSINT extractor. "
         + election_context
@@ -381,8 +511,12 @@ def analyze_and_insert(source_title, source_url, original_title, full_text, imag
     )
     try:
         # Low-signal telemetry so we can spot prompt bloat quickly.
-        print(f"   [ai] in_chars={len(original_title)+len(full_text)} title_chars={len(original_title)} body_chars={len(full_text)}")
-        response = gemini_client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+        print(
+            f"   [ai] model={SIGNAL_GEMINI_MODEL} in_chars={len(original_title)+len(full_text)} "
+            f"title_chars={len(original_title)} body_chars={len(full_text)}"
+        )
+        response = gemini_client.models.generate_content(model=SIGNAL_GEMINI_MODEL, contents=prompt)
+        _llm_record_article()
         text = response.text.strip()
         if text.startswith("```json"): text = text[7:-3].strip()
         analysis = json.loads(text)
@@ -457,18 +591,49 @@ def analyze_and_insert(source_title, source_url, original_title, full_text, imag
 
 def generate_ai_briefing():
     print("\n[+] Compiling Dynamic 24-Hour AI Briefing...")
-    if not supabase: return
-    
+    if not supabase:
+        return
+    if not gemini_client:
+        print("   [briefing] skip: GEMINI_API_KEY / client missing")
+        return
+    if not _should_run_briefing_now():
+        print(
+            f"   [briefing] skip: interval ({SIGNAL_BRIEFING_INTERVAL_MINUTES}m) not elapsed "
+            f"(set SIGNAL_BRIEFING_INTERVAL_MINUTES=0 for every ingest)"
+        )
+        return
+    if not _llm_can_briefing():
+        print(f"   [briefing] skip: daily LLM cap ({SIGNAL_LLM_MAX_PER_DAY}) reached")
+        return
+
     twenty_four_hrs_ago = (datetime.now(IST) - timedelta(hours=24)).isoformat()
-    
-    res = supabase.table("signals").select("title, body, state, severity, source, verified") \
-          .gte("created_at", twenty_four_hrs_ago) \
-          .order("created_at", desc=True).limit(20).execute()
-          
+
+    res = (
+        supabase.table("signals")
+        .select("title, body, state, severity, source, verified")
+        .gte("created_at", twenty_four_hrs_ago)
+        .order("created_at", desc=True)
+        .limit(max(20, SIGNAL_BRIEFING_MAX_SIGNALS))
+        .execute()
+    )
+
     recent_signals = res.data
-    if not recent_signals or len(recent_signals) < 3: 
+    if not recent_signals or len(recent_signals) < 3:
         print("   -> Not enough data in the last 24h for a briefing.")
         return
+
+    slim = []
+    for s in recent_signals[:SIGNAL_BRIEFING_MAX_SIGNALS]:
+        slim.append(
+            {
+                "title": (s.get("title") or "")[:140],
+                "body": (s.get("body") or "")[:100],
+                "state": s.get("state"),
+                "severity": s.get("severity"),
+                "source": (s.get("source") or "")[:80],
+                "verified": s.get("verified"),
+            }
+        )
 
     hour = datetime.now(IST).hour
     time_of_day = "MORNING" if hour < 12 else "AFTERNOON" if hour < 18 else "EVENING"
@@ -491,26 +656,39 @@ def generate_ai_briefing():
       {{"heading": "Key actors", "body": "…", "color_hex": "#16a34a"}},
       {{"heading": "Next 24h watchlist", "body": "…", "color_hex": "#0284c7"}}
     ]
-    Signals: {json.dumps(recent_signals)}
+    Signals: {json.dumps(slim)}
     """
+    global _last_briefing_ist
     try:
-        response = gemini_client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+        response = gemini_client.models.generate_content(model=SIGNAL_GEMINI_MODEL, contents=prompt)
+        _llm_record_briefing()
         text = response.text.strip()
-        if text.startswith("```json"): text = text[7:-3].strip()
+        if text.startswith("```json"):
+            text = text[7:-3].strip()
         paragraphs = json.loads(text)
-        
-        verified_count = sum(1 for s in recent_signals if s.get('verified'))
-        unique_sources = len(set(s.get('source') for s in recent_signals))
-        confidence = min(5, max(1, int((verified_count / len(recent_signals)) * 3) + (2 if unique_sources > 3 else 1)))
-        
-        supabase.table("briefings").insert({
-            "time_of_day": time_of_day,
-            "paragraphs": paragraphs,
-            "confidence_score": confidence,
-            "sources_count": len(recent_signals)
-        }).execute()
+
+        verified_count = sum(1 for s in recent_signals if s.get("verified"))
+        unique_sources = len(set(s.get("source") for s in recent_signals))
+        confidence = min(
+            5,
+            max(
+                1,
+                int((verified_count / len(recent_signals)) * 3) + (2 if unique_sources > 3 else 1),
+            ),
+        )
+
+        supabase.table("briefings").insert(
+            {
+                "time_of_day": time_of_day,
+                "paragraphs": paragraphs,
+                "confidence_score": confidence,
+                "sources_count": len(recent_signals),
+            }
+        ).execute()
+        _last_briefing_ist = datetime.now(IST)
         print(f"   ->[SUCCESS] {time_of_day} Briefing saved (Conf: {confidence})!")
-    except Exception as e: print(f"   ->[Briefing Error]: {e}")
+    except Exception as e:
+        print(f"   ->[Briefing Error]: {e}")
 
 def cleanup_old_signals():
     """NEW: Deletes signals older than 24 hours to keep the Map and DB extremely clean."""
@@ -581,9 +759,20 @@ def fetch_gdelt() -> list[dict]:
 
 
 def fetch_and_ingest():
+    global _article_llm_run_count
+    _article_llm_run_count = 0
+
     now_ist = datetime.now(IST).strftime('%Y-%m-%d %I:%M:%S %p')
     print(f"\n[{now_ist}] Waking up Advanced Signal Ingestor (IST)...")
-    
+    _llm_refresh_day()
+    print(
+        f"   [llm-config] model={SIGNAL_GEMINI_MODEL} max/run={SIGNAL_LLM_MAX_PER_RUN or '∞'} "
+        f"max/day={SIGNAL_LLM_MAX_PER_DAY or '∞'} day_used={_llm_day_total} "
+        f"briefing_interval_min={SIGNAL_BRIEFING_INTERVAL_MINUTES or 'each cycle'} "
+        f"briefing_signals={SIGNAL_BRIEFING_MAX_SIGNALS} kw_gate={'off' if SIGNAL_DISABLE_KEYWORD_GATE else 'on'}",
+        flush=True,
+    )
+
     # Run garbage collection first
     cleanup_old_signals()
     
@@ -645,10 +834,8 @@ def fetch_and_ingest():
                 summary_html = getattr(entry, 'summary', '')
                 source_name = getattr(entry.source, 'title', 'News') if hasattr(entry, 'source') else "News Network"
                 
-                search_text = (title + " " + summary_html).lower()
-                keywords =["election", "poll", "vote", "congress", "bjp", "cpi", "tmc", "dmk", "rally", "clash", "eci", "candidate", "voter"]
-                
-                if not any(k in search_text for k in keywords):
+                search_text = title + " " + BeautifulSoup(summary_html, "html.parser").get_text(" ")
+                if not _election_keyword_hit(search_text):
                     continue
 
                 print(f"-> Found: {title[:60]}...")
@@ -719,10 +906,7 @@ def fetch_and_ingest():
             if uid and uid in seen_uids: continue
             if cu and cu in seen_urls: continue
 
-            search_text = title.lower()
-            keywords = ["election", "poll", "vote", "congress", "bjp", "cpi", "tmc",
-                        "dmk", "rally", "clash", "eci", "candidate", "voter"]
-            if not any(k in search_text for k in keywords):
+            if not _election_keyword_hit(title):
                 continue
 
             print(f"-> [GDELT] Found: {title[:60]}...")
@@ -766,8 +950,16 @@ def fetch_and_ingest():
 
 if __name__ == "__main__":
     print("=== DHARMA-OSINT Verified AI News Pipeline ===")
-    if not supabase: print("CRITICAL: Supabase offline.")
-    
+    print(
+        f"[llm] SIGNAL_GEMINI_MODEL={SIGNAL_GEMINI_MODEL} | "
+        f"SIGNAL_LLM_MAX_PER_RUN={SIGNAL_LLM_MAX_PER_RUN or 'unlimited'} | "
+        f"SIGNAL_LLM_MAX_PER_DAY={SIGNAL_LLM_MAX_PER_DAY or 'unlimited'} | "
+        f"SIGNAL_BRIEFING_INTERVAL_MINUTES={SIGNAL_BRIEFING_INTERVAL_MINUTES}",
+        flush=True,
+    )
+    if not supabase:
+        print("CRITICAL: Supabase offline.")
+
     while True:
         fetch_and_ingest()
         time.sleep(1800)

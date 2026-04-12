@@ -63,8 +63,8 @@ ECI_STATE_CONFIG = [
     {"name": "Kerala", "code": "S11", "prefix": "KER", "max_pages": 89},
     {"name": "Assam", "code": "S03", "prefix": "ASM", "max_pages": 73},
     {"name": "Puducherry", "code": "U07", "prefix": "PY", "max_pages": 30},
-    # {"name": "Tamil Nadu", "code": "S22", "prefix": "TN", "max_pages": ???},
-    # {"name": "West Bengal", "code": "S25", "prefix": "WB", "max_pages": ???},
+    {"name": "Tamil Nadu", "code": "S22", "prefix": "TN", "max_pages": 403},
+    {"name": "West Bengal", "code": "S25", "prefix": "WB", "max_pages": 148},
 ]
 
 MYNETA_CONFIG = [
@@ -72,6 +72,46 @@ MYNETA_CONFIG = [
     {"name": "Assam", "prefix": "ASM", "base": "https://myneta.info/Assam2026/", "pages": 8},
     {"name": "Puducherry", "prefix": "PY", "base": "https://myneta.info/Puducherry2026/", "pages": 3},
 ]
+
+
+def _config_matches_state_token(cfg: dict, token: str) -> bool:
+    t = (token or "").strip().lower()
+    if not t:
+        return False
+    name = (cfg.get("name") or "").strip().lower()
+    prefix = (cfg.get("prefix") or "").strip().lower()
+    code = (cfg.get("code") or "").strip().lower()
+    return t == name or t == prefix or (bool(code) and t == code)
+
+
+def _parse_states_cli(states_append: list[str] | None) -> list[str] | None:
+    if not states_append:
+        return None
+    out: list[str] = []
+    for chunk in states_append:
+        for part in str(chunk).split(","):
+            s = part.strip()
+            if s:
+                out.append(s)
+    return out or None
+
+
+def _validate_state_tokens(tokens: list[str]) -> None:
+    """Reject unknown tokens using ECI config (superset of known state names/prefixes/codes)."""
+    bad = [tok for tok in tokens if not any(_config_matches_state_token(c, tok) for c in ECI_STATE_CONFIG)]
+    if not bad:
+        return
+    hints = "; ".join(
+        f"{c['name']} / {c['prefix']}" + (f" / {c['code']}" if c.get("code") else "")
+        for c in ECI_STATE_CONFIG
+    )
+    raise SystemExit(f"Unknown --states token(s): {bad}. Known states: {hints}")
+
+
+def _filter_configs_by_states(configs: list[dict], tokens: list[str] | None) -> list[dict]:
+    if not tokens:
+        return list(configs)
+    return [c for c in configs if any(_config_matches_state_token(c, t) for t in tokens)]
 
 
 # ----------------------------
@@ -356,7 +396,12 @@ def clean_currency_to_int(s: str) -> int:
 # ----------------------------
 # ECI SCRAPER (Playwright)
 # ----------------------------
-def scrape_and_upsert_eci_candidates(db_constituencies: list[dict], headless: bool = False) -> dict[str, set[str]]:
+def scrape_and_upsert_eci_candidates(
+    db_constituencies: list[dict],
+    headless: bool = False,
+    *,
+    state_configs: list[dict] | None = None,
+) -> dict[str, set[str]]:
     """
     Scrape ECI per-state and upsert candidates.
     Returns: mapping {state_prefix: set(candidate_ids_seen_in_eci)}
@@ -364,6 +409,8 @@ def scrape_and_upsert_eci_candidates(db_constituencies: list[dict], headless: bo
     seen_by_prefix: dict[str, set[str]] = {}
     if not supabase:
         return seen_by_prefix
+
+    configs = state_configs if state_configs is not None else ECI_STATE_CONFIG
 
     print("\n[+] ECI: scraping contesting/accepted candidates...")
     print("    [!] Playwright will open a browser window." if not headless else "    [~] Running headless.")
@@ -376,7 +423,7 @@ def scrape_and_upsert_eci_candidates(db_constituencies: list[dict], headless: bo
         context = browser.new_context(viewport={"width": 1280, "height": 800})
         page = context.new_page()
 
-        for state in ECI_STATE_CONFIG:
+        for state in configs:
             state_name = state["name"]
             state_code = state["code"]
             prefix = state["prefix"]
@@ -798,9 +845,10 @@ def cleanup_bad_education_fields(*, dry_run: bool = False) -> int:
     return updated
 
 
-def enrich_candidates_from_myneta(*, headless: bool = True) -> None:
+def enrich_candidates_from_myneta(*, headless: bool = True, myneta_configs: list[dict] | None = None) -> None:
     if not supabase:
         return
+    configs = myneta_configs if myneta_configs is not None else MYNETA_CONFIG
     print("\n[+] MyNeta: enriching candidates (Playwright - summary + profiles are JS-rendered)...", flush=True)
     if _gemini_client:
         print(
@@ -824,7 +872,7 @@ def enrich_candidates_from_myneta(*, headless: bool = True) -> None:
         )
         pw_page = ctx.new_page()
 
-        for cfg in MYNETA_CONFIG:
+        for cfg in configs:
             state_name = cfg["name"]
             prefix = cfg["prefix"]
             base = cfg["base"]
@@ -1109,22 +1157,41 @@ def main() -> None:
         action="store_true",
         help="Detect corrupted education blobs but do not write changes (use with --cleanup-education).",
     )
+    parser.add_argument(
+        "--states",
+        action="append",
+        metavar="LIST",
+        help="Limit to these states only (repeat flag and/or comma-separated). Matches name, prefix (e.g. KER), or ECI code (e.g. S11).",
+    )
     args = parser.parse_args()
 
     if not supabase:
         print("CRITICAL: Supabase offline.")
         return
 
+    state_tokens = _parse_states_cli(args.states)
+    if state_tokens:
+        _validate_state_tokens(state_tokens)
+        print(f"[+] States filter: {', '.join(state_tokens)}", flush=True)
+
     if args.myneta_only:
         print("[mode] MyNeta enrichment only\n")
+        myneta_cfgs = _filter_configs_by_states(MYNETA_CONFIG, state_tokens)
+        if not myneta_cfgs:
+            print(
+                "CRITICAL: No MyNeta coverage for selected --states. "
+                f"MyNeta is configured for: {', '.join(c['name'] for c in MYNETA_CONFIG)}.",
+                flush=True,
+            )
+            return
         if args.cleanup_education:
             cleanup_bad_education_fields(dry_run=args.cleanup_dry_run)
         if int(args.myneta_workers or 1) <= 1:
-            enrich_candidates_from_myneta(headless=not args.myneta_visible)
+            enrich_candidates_from_myneta(headless=not args.myneta_visible, myneta_configs=myneta_cfgs)
         else:
             workers = max(1, min(int(args.myneta_workers), 3))
             print(f"[+] MyNeta: running in parallel (workers={workers})", flush=True)
-            cfgs = list(MYNETA_CONFIG)
+            cfgs = list(myneta_cfgs)
             results = []
             with ProcessPoolExecutor(max_workers=workers) as ex:
                 futs = [ex.submit(_myneta_worker_run, cfg, headless=not args.myneta_visible) for cfg in cfgs]
@@ -1144,8 +1211,11 @@ def main() -> None:
         print("CRITICAL: constituencies table is empty.")
         return
 
-    seen_map = scrape_and_upsert_eci_candidates(db_constituencies, headless=args.eci_headless)
-    for state in ECI_STATE_CONFIG:
+    eci_cfgs = _filter_configs_by_states(ECI_STATE_CONFIG, state_tokens)
+    seen_map = scrape_and_upsert_eci_candidates(
+        db_constituencies, headless=args.eci_headless, state_configs=eci_cfgs
+    )
+    for state in eci_cfgs:
         prefix = state["prefix"]
         seen = seen_map.get(prefix, set())
         mark_removed_candidates(prefix, seen)
@@ -1154,14 +1224,24 @@ def main() -> None:
         print("\n[OK] ECI SYNC COMPLETE (--eci-only; skipped MyNeta).")
         return
 
+    myneta_cfgs = _filter_configs_by_states(MYNETA_CONFIG, state_tokens)
+    if not myneta_cfgs:
+        print(
+            "\n[~] Skipping MyNeta: no MyNeta configuration for selected --states "
+            f"(MyNeta: {', '.join(c['name'] for c in MYNETA_CONFIG)}).",
+            flush=True,
+        )
+        print("\n[OK] PIPELINE COMPLETE (ECI only for this selection).")
+        return
+
     if args.cleanup_education:
         cleanup_bad_education_fields(dry_run=args.cleanup_dry_run)
     if int(args.myneta_workers or 1) <= 1:
-        enrich_candidates_from_myneta(headless=not args.myneta_visible)
+        enrich_candidates_from_myneta(headless=not args.myneta_visible, myneta_configs=myneta_cfgs)
     else:
         workers = max(1, min(int(args.myneta_workers), 3))
         print(f"[+] MyNeta: running in parallel (workers={workers})", flush=True)
-        cfgs = list(MYNETA_CONFIG)
+        cfgs = list(myneta_cfgs)
         results = []
         with ProcessPoolExecutor(max_workers=workers) as ex:
             futs = [ex.submit(_myneta_worker_run, cfg, headless=not args.myneta_visible) for cfg in cfgs]
