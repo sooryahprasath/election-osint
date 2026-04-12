@@ -38,6 +38,12 @@ yarn-error.log*
 venv/
 osint_workers/.venv/
 .venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+osint_workers/*.pid
 # vercel
 .vercel
 
