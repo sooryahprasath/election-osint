@@ -1,3 +1,4 @@
+# Python workers (use: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt)
 beautifulsoup4==4.12.3
 requests==2.31.0
 google-genai>=1.0.0
@@ -9,5 +10,3 @@ googlenewsdecoder
 crawl4ai>=0.7.0
 playwright==1.54.0
 pypdf>=5.0.0
-httpx>=0.28.0
-websockets>=13,<15
