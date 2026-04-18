@@ -10,11 +10,11 @@ import gc
 import urllib.parse
 import re
 import hashlib
+import calendar
 from datetime import date, datetime, timedelta, timezone
 from google import genai
 from googleapiclient.discovery import build
 from dotenv import load_dotenv
-from supabase import create_client, Client
 
 env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
 _loaded = load_dotenv(dotenv_path=env_path)
@@ -58,45 +58,66 @@ SIGNAL_BRIEFING_INTERVAL_MINUTES = _parse_int_env("SIGNAL_BRIEFING_INTERVAL_MINU
 SIGNAL_BRIEFING_MAX_SIGNALS = _parse_int_env("SIGNAL_BRIEFING_MAX_SIGNALS", 12)
 SIGNAL_GEMINI_MODEL = os.getenv("SIGNAL_GEMINI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
 SIGNAL_DISABLE_KEYWORD_GATE = os.getenv("SIGNAL_DISABLE_KEYWORD_GATE", "").lower() in ("1", "true", "yes")
+SIGNAL_MAX_ENTRY_AGE_HOURS = _parse_int_env("SIGNAL_MAX_ENTRY_AGE_HOURS", 24)
+SIGNAL_ENABLE_GDELT = os.getenv("SIGNAL_ENABLE_GDELT", "true").lower() in ("1", "true", "yes")
+SIGNAL_GDELT_LOOKBACK_HOURS = _parse_int_env("SIGNAL_GDELT_LOOKBACK_HOURS", 24)
+SIGNAL_RUN_ONCE = os.getenv("SIGNAL_RUN_ONCE", "").lower() in ("1", "true", "yes")
 SIGNAL_KEYWORD_EXTRA = [
     x.strip().lower()
     for x in (os.getenv("SIGNAL_KEYWORD_EXTRA") or "").split(",")
     if x.strip()
 ]
 
-_BASE_SIGNAL_KEYWORDS = frozenset(
+_STRONG_ELECTION_TERMS = frozenset(
     {
         "election",
+        "polling",
         "poll",
         "vote",
-        "congress",
-        "bjp",
-        "cpi",
-        "tmc",
-        "dmk",
-        "rally",
-        "clash",
+        "voting",
         "eci",
-        "candidate",
-        "voter",
+        "election commission",
+        "model code of conduct",
+        "mcc",
         "evm",
         "booth",
-        "mcc",
+        "booth capture",
+        "turnout",
         "counting",
-        "ballot",
         "nomination",
         "affidavit",
-        "turnout",
+        "by-election",
+        "exit poll",
+        "phase",
+    }
+)
+
+_ELECTION_CONTEXT_TERMS = frozenset(
+    {
+        "assembly election",
+        "state election",
+        "constituency",
+        "polling station",
+        "returning officer",
+        "vote share",
+        "margin",
+        "campaign",
+        "rally",
+        "manifesto",
+    }
+)
+
+_STATE_NAMES = frozenset(
+    {
         "tamil nadu",
         "kerala",
         "west bengal",
         "assam",
         "puducherry",
         "bengal",
-        "phase",
+        "india",
     }
 )
-SIGNAL_KEYWORDS = _BASE_SIGNAL_KEYWORDS.union(SIGNAL_KEYWORD_EXTRA)
 
 _article_llm_run_count = 0
 _llm_day_total = 0
@@ -143,7 +164,17 @@ def _election_keyword_hit(text: str) -> bool:
     if SIGNAL_DISABLE_KEYWORD_GATE:
         return True
     blob = (text or "").lower()
-    return any(k in blob for k in SIGNAL_KEYWORDS)
+
+    # Tight gate: require explicit election mechanics + contextual cue.
+    # This avoids false positives from generic party/politics stories.
+    has_strong = any(k in blob for k in _STRONG_ELECTION_TERMS)
+    if not has_strong and SIGNAL_KEYWORD_EXTRA:
+        has_strong = any(k in blob for k in SIGNAL_KEYWORD_EXTRA)
+    if not has_strong:
+        return False
+
+    has_context = any(k in blob for k in _STATE_NAMES) or any(k in blob for k in _ELECTION_CONTEXT_TERMS)
+    return has_context
 
 
 def _should_run_briefing_now() -> bool:
@@ -177,10 +208,74 @@ try:
             "WARN: Active key is not service_role — INSERT into signals will fail under RLS. "
             "Set SUPABASE_SERVICE_ROLE_KEY on the VM (same project as URL) and restart."
         )
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    _SB_REST = f"{SUPABASE_URL.rstrip('/')}/rest/v1"
+    _SB_HEADERS = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+    }
+    supabase = True
 except Exception as e:
     print(f"CRITICAL: Supabase offline: {e}")
     supabase = None
+
+
+def _sb_req(method: str, table: str, params: dict | None = None, payload=None):
+    if not supabase:
+        raise RuntimeError("supabase_offline")
+    url = f"{_SB_REST}/{table}"
+    resp = requests.request(method, url, headers=_SB_HEADERS, params=params or {}, json=payload, timeout=25)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"supabase_http_{resp.status_code}: {resp.text[:240]}")
+    if resp.text.strip() == "":
+        return None
+    try:
+        return resp.json()
+    except Exception:
+        return resp.text
+
+
+def sb_select(
+    table: str,
+    select: str,
+    *,
+    filters: dict[str, str] | None = None,
+    order: str | None = None,
+    limit: int | None = None,
+) -> list[dict]:
+    params: dict[str, str] = {"select": select}
+    if filters:
+        params.update(filters)
+    if order:
+        params["order"] = order
+    if limit is not None:
+        params["limit"] = str(int(limit))
+    data = _sb_req("GET", table, params=params)
+    return data if isinstance(data, list) else []
+
+
+def sb_insert(table: str, row: dict) -> None:
+    # Prefer minimal response payload to keep worker fast.
+    headers = dict(_SB_HEADERS)
+    headers["Prefer"] = "return=minimal"
+    url = f"{_SB_REST}/{table}"
+    resp = requests.post(url, headers=headers, json=row, timeout=25)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"supabase_insert_{resp.status_code}: {resp.text[:240]}")
+
+
+def sb_delete_lt(table: str, field: str, iso: str) -> int:
+    headers = dict(_SB_HEADERS)
+    headers["Prefer"] = "return=representation"
+    url = f"{_SB_REST}/{table}"
+    resp = requests.delete(url, headers=headers, params={field: f"lt.{iso}"}, timeout=25)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"supabase_delete_{resp.status_code}: {resp.text[:240]}")
+    try:
+        data = resp.json()
+        return len(data) if isinstance(data, list) else 0
+    except Exception:
+        return 0
 
 FEEDS = {
     # --- National & Official ---
@@ -256,6 +351,32 @@ def extract_article_data(url, fallback_html):
         
     # Token-safety: keep ingestion conservative.
     return full_text[:1400], image_url, final_url
+
+
+def _entry_published_dt(entry) -> datetime | None:
+    """
+    Best-effort published/updated timestamp from feedparser entries.
+    Returns UTC datetime when available.
+    """
+    for attr in ("published_parsed", "updated_parsed"):
+        st = getattr(entry, attr, None)
+        if st:
+            try:
+                ts = calendar.timegm(st)
+                return datetime.fromtimestamp(ts, tz=timezone.utc)
+            except Exception:
+                pass
+    return None
+
+
+def _is_recent_enough(published_utc: datetime | None, max_age_hours: int) -> bool:
+    if max_age_hours <= 0:
+        return True
+    if published_utc is None:
+        # Some feeds omit timestamps; allow but rely on other guards (dedupe + source query windows).
+        return True
+    now_utc = datetime.now(timezone.utc)
+    return published_utc >= (now_utc - timedelta(hours=max_age_hours))
 
 
 def _norm_title(t: str) -> str:
@@ -581,7 +702,7 @@ def analyze_and_insert(source_title, source_url, original_title, full_text, imag
             row["latitude"], row["longitude"] = coords[0], coords[1]
 
         if supabase:
-            supabase.table("signals").insert(row).execute()
+            sb_insert("signals", row)
             print(f"   ->[SUCCESS] Saved | SEV-{severity}")
             return True
         return False
@@ -607,17 +728,13 @@ def generate_ai_briefing():
         return
 
     twenty_four_hrs_ago = (datetime.now(IST) - timedelta(hours=24)).isoformat()
-
-    res = (
-        supabase.table("signals")
-        .select("title, body, state, severity, source, verified")
-        .gte("created_at", twenty_four_hrs_ago)
-        .order("created_at", desc=True)
-        .limit(max(20, SIGNAL_BRIEFING_MAX_SIGNALS))
-        .execute()
+    recent_signals = sb_select(
+        "signals",
+        "title,body,state,severity,source,verified,created_at",
+        filters={"created_at": f"gte.{twenty_four_hrs_ago}"},
+        order="created_at.desc",
+        limit=max(20, SIGNAL_BRIEFING_MAX_SIGNALS),
     )
-
-    recent_signals = res.data
     if not recent_signals or len(recent_signals) < 3:
         print("   -> Not enough data in the last 24h for a briefing.")
         return
@@ -677,14 +794,15 @@ def generate_ai_briefing():
             ),
         )
 
-        supabase.table("briefings").insert(
+        sb_insert(
+            "briefings",
             {
                 "time_of_day": time_of_day,
                 "paragraphs": paragraphs,
                 "confidence_score": confidence,
                 "sources_count": len(recent_signals),
-            }
-        ).execute()
+            },
+        )
         _last_briefing_ist = datetime.now(IST)
         print(f"   ->[SUCCESS] {time_of_day} Briefing saved (Conf: {confidence})!")
     except Exception as e:
@@ -695,8 +813,7 @@ def cleanup_old_signals():
     if not supabase: return
     try:
         twenty_four_hrs_ago = (datetime.now(IST) - timedelta(hours=24)).isoformat()
-        res = supabase.table("signals").delete().lt("created_at", twenty_four_hrs_ago).execute()
-        deleted_count = len(res.data) if res.data else 0
+        deleted_count = sb_delete_lt("signals", "created_at", twenty_four_hrs_ago)
         print(f"[+] Garbage Collection: Cleared {deleted_count} expired signals from the map.")
     except Exception as e:
         print(f"   ->[Cleanup Error]: {e}")
@@ -704,6 +821,12 @@ def cleanup_old_signals():
 def fetch_gdelt() -> list[dict]:
     """Fetch GDELT Doc 2.0 API for each election state. Rate limit: 1 call per 5 seconds."""
     articles = []
+    now_utc = datetime.now(timezone.utc)
+    lookback = max(1, int(SIGNAL_GDELT_LOOKBACK_HOURS or 24))
+    start_utc = now_utc - timedelta(hours=lookback)
+    # GDELT expects YYYYMMDDHHMMSS in UTC
+    start_str = start_utc.strftime("%Y%m%d%H%M%S")
+    end_str = now_utc.strftime("%Y%m%d%H%M%S")
     for state_context, query_phrase in GDELT_QUERIES.items():
         data = None
         backoff = 6
@@ -718,6 +841,8 @@ def fetch_gdelt() -> list[dict]:
                         "format": "json",
                         "sourcelang": "english",
                         "sourcecountry": "IN",
+                        "startdatetime": start_str,
+                        "enddatetime": end_str,
                     },
                     timeout=15,
                 )
@@ -743,6 +868,10 @@ def fetch_gdelt() -> list[dict]:
                 ).replace(tzinfo=timezone.utc)
             except Exception:
                 seen_date = datetime.now(timezone.utc)
+
+            # Secondary recency guard (in case upstream ignores the window).
+            if not _is_recent_enough(seen_date, lookback):
+                continue
 
             articles.append({
                 "state_context": state_context,
@@ -776,7 +905,8 @@ def fetch_and_ingest():
     # Run garbage collection first
     cleanup_old_signals()
     
-    valid_c_ids = [row["id"] for row in supabase.table("constituencies").select("id").execute().data] if supabase else[]
+    valid_c_ids = [row.get("id") for row in sb_select("constituencies", "id", limit=2000)] if supabase else []
+    valid_c_ids = [x for x in valid_c_ids if x]
 
     seen_titles: set[str] = set()
     seen_urls: set[str] = set()
@@ -786,14 +916,14 @@ def fetch_and_ingest():
     if supabase:
         try:
             since = (datetime.now(IST) - timedelta(days=3)).isoformat()
-            recent = (
-                supabase.table("signals")
-                .select("title,body,source_url,created_at")
-                .gte("created_at", since)
-                .limit(1200)
-                .execute()
+            recent = sb_select(
+                "signals",
+                "title,body,source_url,created_at",
+                filters={"created_at": f"gte.{since}"},
+                order="created_at.desc",
+                limit=1200,
             )
-            for row in recent.data or []:
+            for row in recent or []:
                 if row.get("title"):
                     seen_titles.add(_norm_title(row["title"]))
                 if row.get("source_url"):
@@ -836,6 +966,10 @@ def fetch_and_ingest():
                 
                 search_text = title + " " + BeautifulSoup(summary_html, "html.parser").get_text(" ")
                 if not _election_keyword_hit(search_text):
+                    continue
+
+                published_utc = _entry_published_dt(entry)
+                if not _is_recent_enough(published_utc, SIGNAL_MAX_ENTRY_AGE_HOURS):
                     continue
 
                 print(f"-> Found: {title[:60]}...")
@@ -883,9 +1017,16 @@ def fetch_and_ingest():
         gc.collect()
 
     # --- GDELT ingestion ---
-    print("\n[+] Starting GDELT ingestion...")
-    gdelt_articles = fetch_gdelt()
-    print(f"   -> Fetched {len(gdelt_articles)} GDELT articles across {len(GDELT_QUERIES)} states.")
+    if not SIGNAL_ENABLE_GDELT:
+        print("\n[+] GDELT ingestion disabled (SIGNAL_ENABLE_GDELT=false).")
+        gdelt_articles = []
+    else:
+        print("\n[+] Starting GDELT ingestion...")
+        gdelt_articles = fetch_gdelt()
+        print(
+            f"   -> Fetched {len(gdelt_articles)} GDELT articles "
+            f"(lookback={SIGNAL_GDELT_LOOKBACK_HOURS}h) across {len(GDELT_QUERIES)} states."
+        )
 
     for article in gdelt_articles:
         try:
@@ -959,6 +1100,10 @@ if __name__ == "__main__":
     )
     if not supabase:
         print("CRITICAL: Supabase offline.")
+
+    if SIGNAL_RUN_ONCE:
+        fetch_and_ingest()
+        raise SystemExit(0)
 
     while True:
         fetch_and_ingest()
