@@ -11,6 +11,7 @@ import urllib.parse
 import re
 import hashlib
 import calendar
+from email.utils import parsedate_to_datetime
 from datetime import date, datetime, timedelta, timezone
 from google import genai
 from googleapiclient.discovery import build
@@ -50,15 +51,31 @@ def _parse_int_env(name: str, default: int) -> int:
         return default
 
 
+# Free tier (Google AI / Gemini API): typical Flash-class limits are on the order of ~15 RPM and ~1.5k RPD
+# — exact numbers change; see https://ai.google.dev/gemini-api/docs/rate-limits — set SIGNAL_GEMINI_FREE_TIER=1 to
+# use conservative defaults + spacing between calls. You can still override caps via env.
+SIGNAL_GEMINI_FREE_TIER = os.getenv("SIGNAL_GEMINI_FREE_TIER", "").lower() in ("1", "true", "yes")
+_default_llm_run = 25 if SIGNAL_GEMINI_FREE_TIER else 50
+_default_llm_day = 1000 if SIGNAL_GEMINI_FREE_TIER else 800
+_default_gemini_gap = 4.0 if SIGNAL_GEMINI_FREE_TIER else 0.0
+
 # LLM usage caps (0 = unlimited). Counts reset: per-run counter each ingest cycle; daily at midnight IST.
-SIGNAL_LLM_MAX_PER_RUN = _parse_int_env("SIGNAL_LLM_MAX_PER_RUN", 50)
-SIGNAL_LLM_MAX_PER_DAY = _parse_int_env("SIGNAL_LLM_MAX_PER_DAY", 800)
+SIGNAL_LLM_MAX_PER_RUN = _parse_int_env("SIGNAL_LLM_MAX_PER_RUN", _default_llm_run)
+SIGNAL_LLM_MAX_PER_DAY = _parse_int_env("SIGNAL_LLM_MAX_PER_DAY", _default_llm_day)
 # Briefing: 0 = run every ingest cycle; else minimum minutes between Gemini briefing calls.
 SIGNAL_BRIEFING_INTERVAL_MINUTES = _parse_int_env("SIGNAL_BRIEFING_INTERVAL_MINUTES", 360)
 SIGNAL_BRIEFING_MAX_SIGNALS = _parse_int_env("SIGNAL_BRIEFING_MAX_SIGNALS", 12)
 SIGNAL_GEMINI_MODEL = os.getenv("SIGNAL_GEMINI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
 SIGNAL_DISABLE_KEYWORD_GATE = os.getenv("SIGNAL_DISABLE_KEYWORD_GATE", "").lower() in ("1", "true", "yes")
 SIGNAL_MAX_ENTRY_AGE_HOURS = _parse_int_env("SIGNAL_MAX_ENTRY_AGE_HOURS", 24)
+# If True, only accept RSS items whose published instant falls on today's calendar date in IST.
+SIGNAL_REQUIRE_TODAY_IST = os.getenv("SIGNAL_REQUIRE_TODAY_IST", "").lower() in ("1", "true", "yes")
+# If False, RSS entries with no parseable date are skipped (fixes "3 week old" items that had no timestamp).
+SIGNAL_ALLOW_UNDATED_RSS = os.getenv("SIGNAL_ALLOW_UNDATED_RSS", "").lower() in ("1", "true", "yes")
+try:
+    SIGNAL_GEMINI_MIN_INTERVAL_SEC = float(os.getenv("SIGNAL_GEMINI_MIN_INTERVAL_SEC", str(_default_gemini_gap)))
+except ValueError:
+    SIGNAL_GEMINI_MIN_INTERVAL_SEC = _default_gemini_gap
 SIGNAL_ENABLE_GDELT = os.getenv("SIGNAL_ENABLE_GDELT", "true").lower() in ("1", "true", "yes")
 SIGNAL_GDELT_LOOKBACK_HOURS = _parse_int_env("SIGNAL_GDELT_LOOKBACK_HOURS", 24)
 SIGNAL_RUN_ONCE = os.getenv("SIGNAL_RUN_ONCE", "").lower() in ("1", "true", "yes")
@@ -190,6 +207,22 @@ def _should_run_briefing_now() -> bool:
 
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY) if YOUTUBE_API_KEY else None
+
+_last_gemini_mono: float = 0.0
+
+
+def _pace_gemini_call() -> None:
+    """Space out Gemini API calls to respect free-tier RPM-style limits."""
+    global _last_gemini_mono
+    gap = max(0.0, float(SIGNAL_GEMINI_MIN_INTERVAL_SEC or 0.0))
+    if gap <= 0:
+        return
+    now = time.monotonic()
+    if _last_gemini_mono > 0:
+        elapsed = now - _last_gemini_mono
+        if elapsed < gap:
+            time.sleep(gap - elapsed)
+    _last_gemini_mono = time.monotonic()
 
 try:
     if not SUPABASE_URL or not SUPABASE_KEY:
@@ -353,6 +386,28 @@ def extract_article_data(url, fallback_html):
     return full_text[:1400], image_url, final_url
 
 
+def _parse_rss_date_string(raw: str) -> datetime | None:
+    """Parse RSS/Atom date strings (RFC 2822, common ISO variants). Returns UTC."""
+    s = (raw or "").strip()
+    if not s:
+        return None
+    try:
+        dt = parsedate_to_datetime(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        pass
+    try:
+        iso = s.replace("Z", "+00:00")
+        dt2 = datetime.fromisoformat(iso)
+        if dt2.tzinfo is None:
+            dt2 = dt2.replace(tzinfo=timezone.utc)
+        return dt2.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
 def _entry_published_dt(entry) -> datetime | None:
     """
     Best-effort published/updated timestamp from feedparser entries.
@@ -366,17 +421,31 @@ def _entry_published_dt(entry) -> datetime | None:
                 return datetime.fromtimestamp(ts, tz=timezone.utc)
             except Exception:
                 pass
+    for attr in ("published", "updated", "created"):
+        s = getattr(entry, attr, None)
+        if isinstance(s, str) and s.strip():
+            got = _parse_rss_date_string(s)
+            if got:
+                return got
     return None
+
+
+def _published_is_today_ist(published_utc: datetime) -> bool:
+    return published_utc.astimezone(IST).date() == datetime.now(IST).date()
 
 
 def _is_recent_enough(published_utc: datetime | None, max_age_hours: int) -> bool:
     if max_age_hours <= 0:
         return True
     if published_utc is None:
-        # Some feeds omit timestamps; allow but rely on other guards (dedupe + source query windows).
-        return True
+        # Previously this returned True and let undated items through → stale syndicated stories.
+        return SIGNAL_ALLOW_UNDATED_RSS
     now_utc = datetime.now(timezone.utc)
-    return published_utc >= (now_utc - timedelta(hours=max_age_hours))
+    if published_utc >= (now_utc - timedelta(hours=max_age_hours)):
+        if SIGNAL_REQUIRE_TODAY_IST and not _published_is_today_ist(published_utc):
+            return False
+        return True
+    return False
 
 
 def _norm_title(t: str) -> str:
@@ -636,7 +705,18 @@ def analyze_and_insert(source_title, source_url, original_title, full_text, imag
             f"   [ai] model={SIGNAL_GEMINI_MODEL} in_chars={len(original_title)+len(full_text)} "
             f"title_chars={len(original_title)} body_chars={len(full_text)}"
         )
-        response = gemini_client.models.generate_content(model=SIGNAL_GEMINI_MODEL, contents=prompt)
+        _pace_gemini_call()
+        try:
+            response = gemini_client.models.generate_content(model=SIGNAL_GEMINI_MODEL, contents=prompt)
+        except Exception as gen_e:
+            err_s = str(gen_e).lower()
+            if "429" in err_s or "quota" in err_s or "resource" in err_s:
+                print("   [ai] quota/rate hit — sleeping 65s and retrying once...")
+                time.sleep(65)
+                _pace_gemini_call()
+                response = gemini_client.models.generate_content(model=SIGNAL_GEMINI_MODEL, contents=prompt)
+            else:
+                raise
         _llm_record_article()
         text = response.text.strip()
         if text.startswith("```json"): text = text[7:-3].strip()
@@ -777,6 +857,7 @@ def generate_ai_briefing():
     """
     global _last_briefing_ist
     try:
+        _pace_gemini_call()
         response = gemini_client.models.generate_content(model=SIGNAL_GEMINI_MODEL, contents=prompt)
         _llm_record_briefing()
         text = response.text.strip()
@@ -867,7 +948,8 @@ def fetch_gdelt() -> list[dict]:
                     article.get("seendate", ""), "%Y%m%dT%H%M%SZ"
                 ).replace(tzinfo=timezone.utc)
             except Exception:
-                seen_date = datetime.now(timezone.utc)
+                # Do not treat parse failures as "now" — that bypasses recency and lets stale rows in.
+                continue
 
             # Secondary recency guard (in case upstream ignores the window).
             if not _is_recent_enough(seen_date, lookback):
@@ -895,10 +977,16 @@ def fetch_and_ingest():
     print(f"\n[{now_ist}] Waking up Advanced Signal Ingestor (IST)...")
     _llm_refresh_day()
     print(
-        f"   [llm-config] model={SIGNAL_GEMINI_MODEL} max/run={SIGNAL_LLM_MAX_PER_RUN or '∞'} "
-        f"max/day={SIGNAL_LLM_MAX_PER_DAY or '∞'} day_used={_llm_day_total} "
+        f"   [llm-config] model={SIGNAL_GEMINI_MODEL} free_tier_mode={SIGNAL_GEMINI_FREE_TIER} "
+        f"gemini_min_interval_s={SIGNAL_GEMINI_MIN_INTERVAL_SEC} "
+        f"max/run={SIGNAL_LLM_MAX_PER_RUN or '∞'} max/day={SIGNAL_LLM_MAX_PER_DAY or '∞'} day_used={_llm_day_total} "
         f"briefing_interval_min={SIGNAL_BRIEFING_INTERVAL_MINUTES or 'each cycle'} "
         f"briefing_signals={SIGNAL_BRIEFING_MAX_SIGNALS} kw_gate={'off' if SIGNAL_DISABLE_KEYWORD_GATE else 'on'}",
+        flush=True,
+    )
+    print(
+        f"   [recency] max_entry_age_h={SIGNAL_MAX_ENTRY_AGE_HOURS} require_today_ist={SIGNAL_REQUIRE_TODAY_IST} "
+        f"allow_undated_rss={SIGNAL_ALLOW_UNDATED_RSS} gdelt_lookback_h={SIGNAL_GDELT_LOOKBACK_HOURS}",
         flush=True,
     )
 
@@ -970,6 +1058,8 @@ def fetch_and_ingest():
 
                 published_utc = _entry_published_dt(entry)
                 if not _is_recent_enough(published_utc, SIGNAL_MAX_ENTRY_AGE_HOURS):
+                    if published_utc is None and not SIGNAL_ALLOW_UNDATED_RSS:
+                        print(f"   [rss-skip] undated: {title[:72]!r}")
                     continue
 
                 print(f"-> Found: {title[:60]}...")
@@ -1092,7 +1182,7 @@ def fetch_and_ingest():
 if __name__ == "__main__":
     print("=== DHARMA-OSINT Verified AI News Pipeline ===")
     print(
-        f"[llm] SIGNAL_GEMINI_MODEL={SIGNAL_GEMINI_MODEL} | "
+        f"[llm] SIGNAL_GEMINI_MODEL={SIGNAL_GEMINI_MODEL} | SIGNAL_GEMINI_FREE_TIER={SIGNAL_GEMINI_FREE_TIER} | "
         f"SIGNAL_LLM_MAX_PER_RUN={SIGNAL_LLM_MAX_PER_RUN or 'unlimited'} | "
         f"SIGNAL_LLM_MAX_PER_DAY={SIGNAL_LLM_MAX_PER_DAY or 'unlimited'} | "
         f"SIGNAL_BRIEFING_INTERVAL_MINUTES={SIGNAL_BRIEFING_INTERVAL_MINUTES}",
