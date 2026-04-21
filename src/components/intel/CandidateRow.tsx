@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, IndianRupee, User } from "lucide-react";
+import { AlertTriangle, CheckCircle, IndianRupee, User } from "lucide-react";
 import { formatIndianCurrency, normalizeEducation } from "@/lib/utils/formatting";
 
 // Fallback logic to get colors without the old static mock dictionary
@@ -34,7 +34,13 @@ export default function CandidateRow({ candidate, onClick, isLeading }: Candidat
         <div className="relative mt-0.5 h-8 w-8 shrink-0 overflow-hidden rounded-md border border-[color:var(--border)] bg-[var(--surface-2)]">
           {photoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={photoUrl} alt="" className="h-full w-full object-cover" />
+            <img
+              src={photoUrl}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              className="h-full w-full object-cover"
+            />
           ) : (
             <div className="flex h-full w-full items-center justify-center">
               <User className="h-4 w-4 text-[var(--text-muted)] opacity-70" />
@@ -63,7 +69,7 @@ export default function CandidateRow({ candidate, onClick, isLeading }: Candidat
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1 rounded border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[9px] font-bold text-[#16a34a]">
-                    <AlertTriangle className="h-3 w-3" /> CLEAN
+                    <CheckCircle className="h-3 w-3" /> CLEAN
                   </span>
                 )}
 

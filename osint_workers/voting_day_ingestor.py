@@ -58,7 +58,17 @@ load_dotenv(dotenv_path=env_path)
 IST = ZoneInfo("Asia/Kolkata")
 UTC = ZoneInfo("UTC")
 SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+# Workers must use the service role key — the anon key cannot write past RLS.
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+if not SUPABASE_KEY:
+    _anon = os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+    if _anon:
+        print(
+            "WARNING: SUPABASE_SERVICE_ROLE_KEY not set — falling back to anon key.\n"
+            "         All Supabase writes will fail with RLS errors unless you set the service role key.",
+            file=sys.stderr,
+        )
+        SUPABASE_KEY = _anon
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
@@ -882,6 +892,7 @@ TEXT:
                         "party_b_name": data.get("party_b_name"),
                         "party_b_min": int(data.get("party_b_min") or 0),
                         "party_b_max": int(data.get("party_b_max") or 0),
+                        "caveat": (str(data.get("caveat") or "")).strip() or None,
                     }
                 ).execute()
             except Exception as e:

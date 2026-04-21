@@ -1,14 +1,18 @@
 "use client";
 
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { normalizeOperationMode } from "@/lib/config/operationMode";
+import { STATE_META } from "@/lib/utils/states";
 
 const SIGNALS_PAGE_SIZE = 500;
 
 interface LiveDataContextProps {
   constituencies: any[];
   candidates: any[];
+  candidateCounts: Record<string, number>;
+  /** Candidates with criminal_cases &gt; 0 (same scope as candidateCounts). */
+  criminalCounts: Record<string, number>;
   signals: any[];
   turnoutData: any[];
   exitPolls: any[];
@@ -17,6 +21,7 @@ interface LiveDataContextProps {
   isConnected: boolean;
   refreshSignals: () => Promise<void>;
   refreshWarRoom: () => Promise<void>;
+  ensureCandidatesForPrefixes: (prefixes: string[]) => Promise<void>;
   simulatedDate: Date | null;
   setSimulatedDate: (date: Date | null) => void;
   operationMode: string;
@@ -26,6 +31,8 @@ interface LiveDataContextProps {
 const LiveDataContext = createContext<LiveDataContextProps>({
   constituencies: [],
   candidates: [],
+  candidateCounts: {},
+  criminalCounts: {},
   signals: [],
   turnoutData: [],
   exitPolls: [],
@@ -36,6 +43,7 @@ const LiveDataContext = createContext<LiveDataContextProps>({
   setSimulatedDate: () => {},
   refreshSignals: async () => {},
   refreshWarRoom: async () => {},
+  ensureCandidatesForPrefixes: async () => {},
   operationMode: "PRE-POLL",
   setOperationMode: () => {},
 });
@@ -45,6 +53,8 @@ export const useLiveData = () => useContext(LiveDataContext);
 export const LiveDataProvider = ({ children }: { children: React.ReactNode }) => {
   const [constituencies, setConstituencies] = useState<any[]>([]);
   const [candidates, setCandidates] = useState<any[]>([]);
+  const [candidateCounts, setCandidateCounts] = useState<Record<string, number>>({});
+  const [criminalCounts, setCriminalCounts] = useState<Record<string, number>>({});
   const [signals, setSignals] = useState<any[]>([]);
   const [turnoutData, setTurnoutData] = useState<any[]>([]);
   const [exitPolls, setExitPolls] = useState<any[]>([]);
@@ -60,19 +70,100 @@ export const LiveDataProvider = ({ children }: { children: React.ReactNode }) =>
     setOperationModeState(normalizeOperationMode(mode));
   }, []);
 
+  // Columns required across CandidateRow + CandidateModal + ConstituencyCard.
+  // Excludes `background` (large text) — loaded on-demand in CandidateModal.
+  const CANDIDATE_COLS = [
+    "id", "name", "party", "party_abbreviation", "party_color",
+    "constituency_id", "is_independent", "incumbent", "removed",
+    "age", "gender", "assets_value", "liabilities_value",
+    "criminal_cases", "photo_url", "education", "nomination_status",
+    "eci_affidavit_url", "source_url", "myneta_url", "myneta_candidate_id",
+    "eci_last_synced_at", "myneta_last_synced_at",
+  ].join(",")
+
   const fetchHeavyTable = async (table: string) => {
-    let allData: any[] = [];
-    let from = 0;
-    const step = 1000;
-    while (true) {
-      const { data, error } = await supabase.from(table).select("*").range(from, from + step - 1);
-      if (error || !data) break;
-      allData = [...allData, ...data];
-      if (data.length < step) break;
-      from += step;
+    const STEP = 1000
+    // Probe total count first, then fetch all pages in parallel.
+    const baseQuery = supabase.from(table)
+    const countQuery =
+      table === "candidates"
+        ? baseQuery.select(CANDIDATE_COLS, { count: "exact", head: true }).eq("removed", false)
+        : baseQuery.select("*", { count: "exact", head: true })
+
+    const { count, error: cntErr } = await countQuery
+    if (cntErr || count == null || count === 0) return []
+
+    const pages = Math.ceil(count / STEP)
+    const fetches = Array.from({ length: pages }, (_, i) =>
+      table === "candidates"
+        ? supabase
+            .from(table)
+            .select(CANDIDATE_COLS)
+            .eq("removed", false)
+            .range(i * STEP, (i + 1) * STEP - 1)
+        : supabase
+            .from(table)
+            .select("*")
+            .range(i * STEP, (i + 1) * STEP - 1)
+    )
+    const results = await Promise.all(fetches)
+    const allData: any[] = []
+    for (const { data } of results) {
+      if (data) allData.push(...data)
     }
-    return allData;
-  };
+    return allData
+  }
+
+  const loadedCandidatePrefixesRef = useRef<Set<string>>(new Set())
+
+  const fetchCandidatesForPrefix = useCallback(
+    async (prefix: string) => {
+      const STEP = 1000
+      const { count, error: cntErr } = await supabase
+        .from("candidates")
+        .select(CANDIDATE_COLS, { count: "exact", head: true })
+        .eq("removed", false)
+        .like("constituency_id", `${prefix}-%`)
+      if (cntErr || count == null || count === 0) return []
+
+      const pages = Math.ceil(count / STEP)
+      const fetches = Array.from({ length: pages }, (_, i) =>
+        supabase
+          .from("candidates")
+          .select(CANDIDATE_COLS)
+          .eq("removed", false)
+          .like("constituency_id", `${prefix}-%`)
+          .range(i * STEP, (i + 1) * STEP - 1)
+      )
+      const results = await Promise.all(fetches)
+      const out: any[] = []
+      for (const { data } of results) if (data) out.push(...data)
+      return out
+    },
+    [CANDIDATE_COLS]
+  )
+
+  const ensureCandidatesForPrefixes = useCallback(
+    async (prefixes: string[]) => {
+      const wanted = (prefixes || []).map((p) => String(p || "").trim()).filter(Boolean)
+      const toLoad = wanted.filter((p) => !loadedCandidatePrefixesRef.current.has(p))
+      if (toLoad.length === 0) return
+
+      for (const pfx of toLoad) loadedCandidatePrefixesRef.current.add(pfx)
+
+      const chunks = await Promise.all(toLoad.map((pfx) => fetchCandidatesForPrefix(pfx)))
+      const incoming = chunks.flat()
+      if (incoming.length === 0) return
+
+      setCandidates((prev) => {
+        const byId = new Map<string, any>()
+        for (const c of prev) byId.set(String(c.id), c)
+        for (const c of incoming) byId.set(String(c.id), c)
+        return Array.from(byId.values())
+      })
+    },
+    [fetchCandidatesForPrefix]
+  )
 
   useEffect(() => {
     let isMounted = true;
@@ -118,12 +209,59 @@ export const LiveDataProvider = ({ children }: { children: React.ReactNode }) =>
       }
     };
 
-    const loadHeavyData = async () => {
-      const cands = await fetchHeavyTable("candidates");
-      if (isMounted && cands) setCandidates(cands);
+    /** Head-only counts so CANDS + CRIM show immediately (no candidate row download). */
+    const loadOverviewStats = async () => {
+      try {
+        const stateNames = Object.keys(STATE_META).filter((s) => s !== "ALL");
+        const rows = await Promise.all(
+          stateNames.map(async (stateName) => {
+            const prefix = STATE_META[stateName]?.dbPrefix;
+            if (!prefix) return { state: stateName, total: 0, criminal: 0 };
+            const like = `${prefix}-%`;
+            const [totalRes, crimRes] = await Promise.all([
+              supabase
+                .from("candidates")
+                .select("id", { count: "exact", head: true })
+                .eq("removed", false)
+                .like("constituency_id", like),
+              supabase
+                .from("candidates")
+                .select("id", { count: "exact", head: true })
+                .eq("removed", false)
+                .like("constituency_id", like)
+                .gt("criminal_cases", 0),
+            ]);
+            return {
+              state: stateName,
+              total: totalRes.count ?? 0,
+              criminal: crimRes.count ?? 0,
+            };
+          })
+        );
+        const cand: Record<string, number> = {};
+        const crim: Record<string, number> = {};
+        for (const r of rows) {
+          cand[r.state] = r.total;
+          crim[r.state] = r.criminal;
+        }
+        cand.ALL = Object.values(cand).reduce((s, n) => s + (Number(n) || 0), 0);
+        crim.ALL = Object.values(crim).reduce((s, n) => s + (Number(n) || 0), 0);
+        if (isMounted) {
+          setCandidateCounts(cand);
+          setCriminalCounts(crim);
+        }
+      } catch (err) {
+        console.error("[LiveDataContext] Overview stats preload failed", err);
+      }
     };
 
-    loadVanguardData().then(() => loadHeavyData());
+    const loadHeavyData = async () => {
+      // Candidates are loaded on-demand per state prefix (prevents huge cold-start payloads).
+    };
+
+    loadVanguardData()
+      .then(() => loadOverviewStats())
+      .then(() => loadHeavyData());
 
     const refreshSignals = async () => {
       if (!isMounted) return;
@@ -160,6 +298,8 @@ export const LiveDataProvider = ({ children }: { children: React.ReactNode }) =>
       }
     }, 45000);
 
+    const realtimeWarnedRef = { current: false as boolean };
+
     const channel = supabase
       .channel("schema-db-changes")
       .on("postgres_changes", { event: "*", schema: "public", table: "signals" }, (payload) => {
@@ -180,9 +320,8 @@ export const LiveDataProvider = ({ children }: { children: React.ReactNode }) =>
           return prev;
         });
       })
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "candidates" }, (payload) => {
-        if (isMounted) setCandidates((prev) => [...prev, payload.new]);
-      })
+      // NOTE: Do not realtime-stream candidates.
+      // Candidates are large and re-scrapes can introduce duplicates; we load per-state on demand instead.
       .on("postgres_changes", { event: "*", schema: "public", table: "voter_turnout" }, (payload) => {
         if (!isMounted) return;
         if (payload.eventType === "INSERT") {
@@ -228,7 +367,16 @@ export const LiveDataProvider = ({ children }: { children: React.ReactNode }) =>
                 ? err
                 : "No error details from Supabase; falling back to polling.";
 
-          console.warn(`[LiveDataContext] Supabase Realtime ${status.toLowerCase()}: ${detail}`);
+          // Polling still refreshes signals/war-room; Realtime is optional.
+          // Common causes: Realtime not enabled for tables (Dashboard → Database → Publications),
+          // or opening the app from file:// instead of http://localhost.
+          if (!realtimeWarnedRef.current) {
+            realtimeWarnedRef.current = true;
+            console.warn(
+              `[LiveDataContext] Supabase Realtime ${status.toLowerCase()} (once): ${detail} ` +
+                "Signals still update via polling every 15s."
+            );
+          }
           setIsConnected(false);
         }
       });
@@ -245,12 +393,15 @@ export const LiveDataProvider = ({ children }: { children: React.ReactNode }) =>
     () => ({
       constituencies,
       candidates,
+      candidateCounts,
+      criminalCounts,
       signals,
       turnoutData,
       exitPolls,
       liveResults,
       opinionPolls,
       isConnected,
+      ensureCandidatesForPrefixes,
       refreshSignals: async () => {
         const { data } = await supabase
           .from("signals")
@@ -287,12 +438,15 @@ export const LiveDataProvider = ({ children }: { children: React.ReactNode }) =>
     [
       constituencies,
       candidates,
+      candidateCounts,
+      criminalCounts,
       signals,
       turnoutData,
       exitPolls,
       liveResults,
       opinionPolls,
       isConnected,
+      ensureCandidatesForPrefixes,
       simulatedDate,
       operationMode,
       setOperationMode,

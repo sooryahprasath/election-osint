@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   X,
@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { formatIndianCurrency, normalizeEducation } from "@/lib/utils/formatting";
 import { useLiveData } from "@/lib/context/LiveDataContext";
+import { supabase } from "@/lib/supabase";
 
 const getPartyColor = (party: string) => {
   const hash = party.split("").reduce((acc, char) => char.charCodeAt(0) + ((acc << 5) - acc), 0);
@@ -56,6 +57,8 @@ export default function CandidateModal({
 }) {
   const [mounted, setMounted] = useState(false);
   const [imgError, setImgError] = useState(false);
+  const [background, setBackground] = useState<string | null>(candidate.background ?? null);
+  const bgFetched = useRef(false);
   const { signals, constituencies } = useLiveData();
 
   const seat =
@@ -66,6 +69,18 @@ export default function CandidateModal({
   useEffect(() => {
     setMounted(true);
     document.body.style.overflow = "hidden";
+    // Lazy-load background if it wasn't included in the bulk fetch.
+    if (!bgFetched.current && background == null && candidate.id) {
+      bgFetched.current = true;
+      supabase
+        .from("candidates")
+        .select("background")
+        .eq("id", candidate.id)
+        .single()
+        .then(({ data }) => {
+          if (data?.background) setBackground(data.background);
+        });
+    }
     return () => {
       document.body.style.overflow = "auto";
     };
@@ -173,6 +188,8 @@ export default function CandidateModal({
                   <img
                     src={candidate.photo_url}
                     alt=""
+                    loading="lazy"
+                    decoding="async"
                     className="h-full w-full object-cover"
                     onError={() => setImgError(true)}
                   />
@@ -333,12 +350,12 @@ export default function CandidateModal({
                 </div>
               </div>
 
-              {candidate.background ? (
+              {background ? (
                 <div className="rounded-xl border border-[color:var(--border)] bg-[var(--surface-1)] p-4">
                   <h3 className="mb-2 font-mono text-[10px] font-bold uppercase tracking-wider text-[var(--text-secondary)]">
                     Background
                   </h3>
-                  <p className="text-sm leading-relaxed text-[var(--text-secondary)]">{candidate.background}</p>
+                  <p className="text-sm leading-relaxed text-[var(--text-secondary)]">{background}</p>
                 </div>
               ) : null}
 

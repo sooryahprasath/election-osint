@@ -16,7 +16,7 @@ import { ELECTION_DATES } from "@/lib/utils/countdown";
 const IST = (iso: string) => new Date(iso);
 
 export default function BottomBar() {
-  const { constituencies, signals, candidates, setSimulatedDate, setOperationMode, simulatedDate } = useLiveData();
+  const { constituencies, signals, candidates, candidateCounts, setSimulatedDate, setOperationMode, simulatedDate } = useLiveData();
   const [showDevMenu, setShowDevMenu] = useState(false);
 
   const ENABLE_DEV_MENU = process.env.NEXT_PUBLIC_ENABLE_DEV_MENU === "true";
@@ -39,7 +39,12 @@ export default function BottomBar() {
         <div className="hidden md:flex items-center gap-5">
           <div className="flex items-center gap-1"><Signal className="h-3 w-3 text-[#ea580c]" /><span className="text-[var(--text-secondary)]">SIGNALS: <span className="text-[#ea580c]">{signals.length}</span></span></div>
           <div className="flex items-center gap-1"><MapPin className="h-3 w-3 text-[#0284c7]" /><span className="text-[var(--text-secondary)]">CONSTITUENCIES: <span className="text-[#0284c7]">{constituencies.length}</span></span></div>
-          <div className="flex items-center gap-1"><Users className="h-3 w-3 text-[#16a34a]" /><span className="text-[var(--text-secondary)]">CANDIDATES: <span className="text-[#16a34a]">{candidates.length}</span></span></div>
+          <div className="flex items-center gap-1">
+            <Users className="h-3 w-3 text-[#16a34a]" />
+            <span className="text-[var(--text-secondary)]">
+              CANDIDATES: <span className="text-[#16a34a]">{candidateCounts.ALL ?? candidates.length}</span>
+            </span>
+          </div>
         </div>
 
         <div className="flex items-center gap-3 text-[var(--text-muted)]">
