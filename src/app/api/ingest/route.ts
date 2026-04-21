@@ -146,6 +146,8 @@ const MAX_INGEST_BODY_BYTES = 512_000;
 export async function POST(req: Request) {
   try {
     const isProd = process.env.NODE_ENV === "production";
+
+    // Auth first — before touching the body — to reject unauthenticated callers cheaply.
     if (isProd && !ingestSecret) {
       return NextResponse.json(
         { success: false, error: "Ingest disabled: set INGEST_SHARED_SECRET in production." },
@@ -176,9 +178,10 @@ export async function POST(req: Request) {
     let body = data.body;
 
     if (!body && data.summary) body = data.summary;
-    const sourceStr = typeof source === "string" ? source : String(source || "");
-    const titleStr = typeof title === "string" ? title : String(title || "");
-    const bodyStr = typeof body === "string" ? body : String(body || "");
+    // Cap per-field length before they enter the LLM prompt to limit prompt injection surface.
+    const sourceStr = (typeof source === "string" ? source : String(source || "")).slice(0, 200);
+    const titleStr = (typeof title === "string" ? title : String(title || "")).slice(0, 400);
+    const bodyStr = (typeof body === "string" ? body : String(body || "")).slice(0, 6000);
     const sourceUrlStr = typeof source_url === "string" ? source_url : null;
 
     if (!genAI) {

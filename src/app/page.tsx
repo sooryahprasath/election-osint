@@ -29,7 +29,7 @@ export default function Home() {
   const [activeSignal, setActiveSignal] = useState<Signal | null>(null);
   const [activeClusterSignals, setActiveClusterSignals] = useState<Signal[] | null>(null);
   const [mobileTab, setMobileTab] = useState<"briefing" | "center" | "intel">("center");
-  const [centerMode, setCenterMode] = useState<CenterMode>("signals");
+  const [centerMode, setCenterMode] = useState<CenterMode>("insights");
   const [moreOpen, setMoreOpen] = useState(false);
   const [liveTab, setLiveTab] = useState<"TURNOUT" | "EXIT_POLLS">("TURNOUT");
   const [mapActionsOpen, setMapActionsOpen] = useState(false);
@@ -73,7 +73,8 @@ export default function Home() {
     if (centerDefaultAppliedRef.current) return;
     centerDefaultAppliedRef.current = true;
     const now = simulatedDate ?? new Date();
-    setCenterMode(getDefaultCenterModeOnInitialLoad(now, operationMode));
+    // Requirement: Insights should be the default view on initial load.
+    setCenterMode("insights");
     setMobileTab("center");
   }, [simulatedDate, operationMode]);
 
@@ -81,7 +82,7 @@ export default function Home() {
   const showWarRoomCenter = shouldShowWarRoomCenterTab(effectiveWallNow) && operationMode !== "PRE-POLL";
 
   useEffect(() => {
-    if (!showWarRoomCenter && centerMode === "live") setCenterMode("signals");
+    if (!showWarRoomCenter && centerMode === "live") setCenterMode("insights");
   }, [showWarRoomCenter, centerMode]);
 
   const showMapResetButton = centerMode === "map" && (isMdUp || mobileTab === "center");

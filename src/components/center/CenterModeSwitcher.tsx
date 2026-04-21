@@ -1,8 +1,8 @@
 "use client";
 
-import { Map as MapIcon, Video, Radar, Radio, BarChart3 } from "lucide-react";
+import { Map as MapIcon, Video, Radar, Radio, BarChart3, Sparkles } from "lucide-react";
 
-export type CenterMode = "signals" | "videos" | "map" | "live" | "polls";
+export type CenterMode = "signals" | "videos" | "map" | "live" | "polls" | "insights";
 
 const MODE_META: Record<
   CenterMode,
@@ -13,6 +13,7 @@ const MODE_META: Record<
   map: { label: "MAP", Icon: MapIcon, accent: "#0284c7", bg: "bg-sky-500/10", border: "border-sky-500/25" },
   live: { label: "LIVE", Icon: Radar, accent: "#dc2626", bg: "bg-red-500/10", border: "border-red-500/25" },
   polls: { label: "POLLS", Icon: BarChart3, accent: "#8b5cf6", bg: "bg-violet-500/10", border: "border-violet-500/25" },
+  insights: { label: "INSIGHTS", Icon: Sparkles, accent: "#0ea5e9", bg: "bg-sky-500/10", border: "border-sky-500/25" },
 };
 
 export function CenterModeSwitcher({
@@ -26,7 +27,9 @@ export function CenterModeSwitcher({
   showLive?: boolean;
   liveLabel?: string;
 }) {
-  const modes: CenterMode[] = showLive ? ["live", "signals", "videos", "map", "polls"] : ["signals", "videos", "map", "polls"];
+  const modes: CenterMode[] = showLive
+    ? ["live", "signals", "insights", "videos", "map", "polls"]
+    : ["signals", "insights", "videos", "map", "polls"];
   return (
     <div className="flex items-center gap-1 rounded-lg border border-[color:var(--border)] bg-[var(--surface-1)]/85 p-1 shadow-sm backdrop-blur-sm">
       {modes.map((mode) => {

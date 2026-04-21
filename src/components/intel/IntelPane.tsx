@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { Search, Filter, ChevronRight, AlertTriangle, Activity, X } from "lucide-react";
 import { useLiveData } from "@/lib/context/LiveDataContext";
 import ConstituencyCard from "./ConstituencyCard";
@@ -21,13 +21,41 @@ export default function IntelPane({
   const [partyFilter, setPartyFilter] = useState("ALL");
   const [sortMode, setSortMode] = useState<SortMode>("VOLATILITY");
   const [pendingCandidate, setPendingCandidate] = useState<any | null>(null);
-  const { constituencies, candidates, signals } = useLiveData();
+  const { constituencies, candidates, signals, ensureCandidatesForPrefixes } = useLiveData();
+  
+  useEffect(() => {
+    const onOpen = (evt: Event) => {
+      const e = evt as CustomEvent<{ candidateId?: string }>;
+      const id = String(e?.detail?.candidateId || "");
+      if (!id) return;
+      const cand = (candidates as any[]).find((c: any) => String(c?.id) === id) || null;
+      if (!cand) return;
+      const seatId = String(cand.constituency_id || "");
+      const seat = seatId ? (constituencies as any[]).find((x: any) => String(x?.id) === seatId) || null : null;
+      if (seat?.state) setGlobalStateFilter(seat.state);
+      if (seatId) {
+        // Let parent reset state, then set constituency + pending candidate to open dossier.
+        setTimeout(() => setGlobalConstituencyId(seatId), 50);
+      }
+      setPendingCandidate(cand);
+    };
+    window.addEventListener("openCandidateDossier", onOpen);
+    return () => window.removeEventListener("openCandidateDossier", onOpen);
+  }, [candidates, constituencies, setGlobalConstituencyId, setGlobalStateFilter]);
 
   const activeState = globalStateFilter;
   const SHOW_PENDING_BANNER = process.env.NEXT_PUBLIC_SHOW_PENDING_BANNER !== "false";
   const isPendingState = SHOW_PENDING_BANNER && (activeState === "Tamil Nadu" || activeState === "West Bengal" || activeState === "ALL");
 
   const stateConstituencies = activeState === "ALL" ? constituencies : constituencies.filter((c: any) => c.state === activeState);
+
+  useEffect(() => {
+    if (activeState === "ALL") return;
+    const meta = STATE_META[activeState];
+    const prefix = meta?.dbPrefix;
+    if (!prefix) return;
+    ensureCandidatesForPrefixes([prefix]);
+  }, [activeState, ensureCandidatesForPrefixes]);
 
   const hotspots = useMemo(() => {
     // "Volatility delta" proxy: compare last 6h signal severity sum vs previous 6h
@@ -283,14 +311,14 @@ export default function IntelPane({
         )}
       </div>
 
-      {isPendingState && (
+      {/* {isPendingState && (
         <div className="bg-[#fef08a] border-b border-[#facc15] px-3 py-2 flex items-start gap-2.5 shrink-0 shadow-sm">
           <AlertTriangle className="h-4 w-4 text-[#ca8a04] shrink-0 mt-0.5" />
           <p className="font-mono text-[9px] font-bold text-[#a16207] leading-tight">
             ECI NOMINATION DATA PENDING FOR TN & WB.<br />AWAITING FINAL AFFIDAVIT PUBLICATION.
           </p>
         </div>
-      )}
+      )} */}
 
       <div className="px-2 py-2 border-b border-[color:var(--border)] shrink-0 flex flex-col gap-2 bg-[var(--surface-2)]">
         <div className="flex items-center gap-1.5 px-2 py-1 bg-[var(--surface-1)] border border-[color:var(--border)] rounded-md text-[10px]">

@@ -7,6 +7,7 @@ import CandidateRow from "./CandidateRow";
 import VolatilityGauge from "./VolatilityGauge";
 import CandidateModal from "./CandidateModal";
 import { useLiveData } from "@/lib/context/LiveDataContext";
+import { supabase } from "@/lib/supabase";
 
 interface ConstituencyCardProps {
   constituency: any;
@@ -21,6 +22,7 @@ export default function ConstituencyCard({ constituency, initialCandidate, onCon
   const totalWealth = candidates.reduce((sum, c) => sum + (c.assets_value || 0), 0);
   const totalCriminal = candidates.filter((c) => c.criminal_cases && c.criminal_cases > 0).length;
   const [activeCandidate, setActiveCandidate] = useState<any | null>(null);
+  const [result2021, setResult2021] = useState<any | null>(null);
   const sortedCandidates = [...candidates].sort((a, b) => (b.assets_value || 0) - (a.assets_value || 0));
 
   useEffect(() => {
@@ -30,12 +32,31 @@ export default function ConstituencyCard({ constituency, initialCandidate, onCon
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialCandidate]);
 
+  useEffect(() => {
+    const id = String(constituency?.id || "");
+    if (!id) return;
+    let cancelled = false;
+    supabase
+      .from("constituency_results")
+      .select("winner_name,winner_party,runner_up_name,runner_up_party,margin_votes,turnout_pct,source_url")
+      .eq("constituency_id", id)
+      .eq("election_year", 2021)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled) return;
+        setResult2021(data || null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [constituency?.id]);
+
   return (
     <div className="flex flex-col gap-0">
       {/* Header */}
       <div className="px-3 py-3 border-b border-[color:var(--border)]">
         <div className="flex justify-between items-start mb-1">
-          <h2 className="font-mono text-sm font-bold text-[#16a34a]">
+          <h2 className="font-mono text-sm font-bold text-[#16a34a] truncate min-w-0" title={constituency.name}>
             {constituency.name}
           </h2>
           <span className={`font-mono text-[9px] font-bold px-1.5 py-0.5 rounded ${constituency.reservation !== 'GEN' ? 'bg-[#0284c7]/10 text-[#0284c7] border border-[#0284c7]/30' : 'bg-[var(--surface-3)] text-[var(--text-muted)] border border-[color:var(--border)]'}`}>
@@ -49,7 +70,7 @@ export default function ConstituencyCard({ constituency, initialCandidate, onCon
             {constituency.district}, {constituency.state} • #{constituency.id?.split("-")[1] || "0"}
           </span>
           <span className="flex items-center gap-1">
-            <Shield className="h-3 w-3" /> Phase {constituency.phase} ({constituency.pollingDate})
+            <Shield className="h-3 w-3" /> Phase {constituency.phase ?? "—"}{constituency.pollingDate ? ` · ${constituency.pollingDate}` : ""}
           </span>
           <span className="flex items-center gap-1">
             <Fingerprint className="h-3 w-3" /> Electorate (2021): {constituency.electorate ? constituency.electorate.toLocaleString('en-IN') : 'N/A'}
@@ -79,6 +100,64 @@ export default function ConstituencyCard({ constituency, initialCandidate, onCon
         <VolatilityGauge score={constituency.volatility_score || 0} />
       </div>
 
+      {/* Incumbent + 2021 breakdown */}
+      <div className="px-3 py-3 border-b border-[color:var(--border)]">
+        <div className="flex items-center justify-between mb-2">
+          <span className="font-mono text-[10px] text-[var(--text-secondary)] tracking-wider">
+            INCUMBENT + RESULTS (2021)
+          </span>
+          {result2021?.source_url ? (
+            <a
+              href={result2021.source_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono text-[9px] text-[#0284c7] hover:text-[#0284c7]/80"
+            >
+              Source →
+            </a>
+          ) : null}
+        </div>
+
+        {result2021?.winner_name ? (
+          <div className="grid grid-cols-2 gap-2">
+            <div className="rounded border border-[color:var(--border)] bg-[var(--surface-2)] p-2 min-w-0">
+              <div className="font-mono text-[9px] text-[var(--text-muted)]">Winner (incumbent)</div>
+              <div className="mt-0.5 font-mono text-[11px] font-bold text-[var(--text-secondary)] truncate" title={result2021.winner_name}>
+                {result2021.winner_name}
+              </div>
+              <div className="mt-0.5 font-mono text-[9px] text-[var(--text-muted)] truncate">
+                {result2021.winner_party || "—"}
+              </div>
+            </div>
+            <div className="rounded border border-[color:var(--border)] bg-[var(--surface-2)] p-2 min-w-0">
+              <div className="font-mono text-[9px] text-[var(--text-muted)]">Runner-up</div>
+              <div className="mt-0.5 font-mono text-[11px] font-bold text-[var(--text-secondary)] truncate" title={result2021.runner_up_name || "—"}>
+                {result2021.runner_up_name || "—"}
+              </div>
+              <div className="mt-0.5 font-mono text-[9px] text-[var(--text-muted)] truncate">
+                {result2021.runner_up_party || "—"}
+              </div>
+            </div>
+            <div className="rounded border border-[color:var(--border)] bg-[var(--surface-2)] p-2">
+              <div className="font-mono text-[9px] text-[var(--text-muted)]">Margin (votes)</div>
+              <div className="mt-0.5 font-mono text-[11px] font-bold text-[var(--text-secondary)]">
+                {result2021.margin_votes != null ? Number(result2021.margin_votes).toLocaleString("en-IN") : "—"}
+              </div>
+            </div>
+            <div className="rounded border border-[color:var(--border)] bg-[var(--surface-2)] p-2">
+              <div className="font-mono text-[9px] text-[var(--text-muted)]">Turnout</div>
+              <div className="mt-0.5 font-mono text-[11px] font-bold text-[var(--text-secondary)]">
+                {result2021.turnout_pct != null ? `${Number(result2021.turnout_pct).toFixed(2)}%` : "—"}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded border border-dashed border-[color:var(--border)] bg-[var(--surface-2)] p-3 text-center font-mono text-[10px] text-[var(--text-muted)]">
+            No 2021 result ingested yet for this seat.
+          </div>
+        )}
+      </div>
+
       {/* Quick Stats */}
       <div className="grid grid-cols-3 gap-0 border-b border-[color:var(--border)]">
         <div className="px-3 py-2 border-r border-[color:var(--border)] text-center">
@@ -104,7 +183,9 @@ export default function ConstituencyCard({ constituency, initialCandidate, onCon
       <div className="px-3 py-1.5 border-b border-[color:var(--border)] flex items-center gap-2">
         <TrendingUp className="h-3 w-3 text-[var(--text-muted)]" />
         <span className="font-mono text-[9px] text-[var(--text-muted)]">
-          GPS: {constituency.latitude?.toFixed(4)}°N, {constituency.longitude?.toFixed(4)}°E
+          {constituency.latitude != null && constituency.longitude != null
+            ? `GPS: ${constituency.latitude.toFixed(4)}°N, ${constituency.longitude.toFixed(4)}°E`
+            : "GPS: coordinates not available"}
         </span>
       </div>
 
