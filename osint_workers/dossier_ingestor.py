@@ -183,6 +183,7 @@ MYNETA_CONFIG = [
     {"name": "Assam", "prefix": "ASM", "base": "https://myneta.info/Assam2026/"},
     {"name": "Puducherry", "prefix": "PY", "base": "https://myneta.info/Puducherry2026/"},
     {"name": "West Bengal", "prefix": "WB", "base": "https://myneta.info/WestBengal2026/"},
+    {"name": "Tamil Nadu", "prefix": "TN", "base": "https://myneta.info/TamilNadu2026/"},
 ]
 
 # Safety caps to avoid infinite paging if upstream HTML changes.
@@ -567,9 +568,31 @@ def intelligent_match(target: str, options: list[str]) -> str | None:
     if matches:
         return options[options_clean.index(matches[0])]
 
+    # Final tier: pick the best combined score (token overlap + squished similarity).
+    # This helps when order differs (Tamil/Malayalam initials, aliases) and neither heuristic alone crosses cutoff.
+    best_idx2 = None
+    best_score2 = 0.0
+    for idx, opt in enumerate(options):
+        ov = calculate_token_overlap_v2(target, opt)
+        sim = name_similarity(target, opt)
+        # overlap is more important; similarity still helps break ties
+        sc = ov * 0.70 + sim * 0.30
+        if sc > best_score2:
+            best_score2 = sc
+            best_idx2 = idx
+    if best_idx2 is not None and best_score2 >= 0.62:
+        return options[best_idx2]
+
     if best_idx is not None and best_sim >= 0.78:
         return options[best_idx]
     return None
+
+
+def _myneta_debug_budget() -> int:
+    try:
+        return max(0, int(os.getenv("MYNETA_DEBUG_SAMPLES", "0") or "0"))
+    except Exception:
+        return 0
 
 
 def best_constituency_name_match(raw: str, db_names: list[str]) -> str | None:
@@ -1604,14 +1627,18 @@ def enrich_candidates_from_myneta(*, headless: bool = True, myneta_configs: list
             f"    [~] LLM fallback enabled (max {_LLM_MAX} calls, model={os.getenv('DOSSIER_LLM_MODEL', 'gemini-2.5-flash')})"
         )
 
-    # fetch baseline mapping
-    db_candidates = sb_select(
-        "candidates",
-        "id,name,constituency_id",
-        filters={"removed": "eq.false"},
-        limit=20000,
-    )
-    db_constituencies = sb_select("constituencies", "id,name,state", limit=4000)
+    def _select_all(*, table: str, select: str, filters: dict[str, str], step: int, hard_cap: int) -> list[dict]:
+        rows: list[dict] = []
+        offset = 0
+        while offset < hard_cap:
+            chunk = sb_select(table, select, filters=filters, limit=step, offset=offset)
+            if not chunk:
+                break
+            rows.extend(chunk)
+            if len(chunk) < step:
+                break
+            offset += step
+        return rows
 
     from playwright.sync_api import sync_playwright
 
@@ -1630,6 +1657,26 @@ def enrich_candidates_from_myneta(*, headless: bool = True, myneta_configs: list
             base = cfg["base"]
             max_pages = min(int(cfg.get("pages") or MYNETA_HARD_PAGE_CAP), MYNETA_HARD_PAGE_CAP)
 
+            # IMPORTANT: do NOT load a global fixed-size candidate list (it will truncate once DB grows).
+            # Load per-prefix with pagination so MyNeta matching remains complete for large states (e.g., TN, WB).
+            db_constituencies = _select_all(
+                table="constituencies",
+                select="id,name,state",
+                filters={"id": f"like.{prefix}-%"},
+                step=2000,
+                hard_cap=10000,
+            )
+            db_candidates = _select_all(
+                table="candidates",
+                select="id,name,constituency_id,removed",
+                # IMPORTANT: match against both removed and non-removed candidates.
+                # The ECI pipeline may temporarily mark candidates as removed (status timing / partial scrapes),
+                # but MyNeta already lists them; excluding removed rows causes massive false "no match".
+                filters={"constituency_id": f"like.{prefix}-%"},
+                step=5000,
+                hard_cap=80000,
+            )
+
             state_db_consts = {c["id"]: c["name"] for c in db_constituencies if (c.get("id") or "").startswith(prefix)}
             state_db_cands = [c for c in db_candidates if (c.get("constituency_id") or "").startswith(prefix)]
 
@@ -1639,6 +1686,12 @@ def enrich_candidates_from_myneta(*, headless: bool = True, myneta_configs: list
 
             merged = 0
             unresolved = 0
+            dbg_budget = _myneta_debug_budget()
+            dbg_printed = 0
+            dbg_const_no_match: list[dict] = []
+            dbg_const_no_id: list[dict] = []
+            dbg_no_cands_in_const: list[dict] = []
+            dbg_name_no_match: list[dict] = []
 
             page_no = 1
             empty_streak = 0
@@ -1677,15 +1730,30 @@ def enrich_candidates_from_myneta(*, headless: bool = True, myneta_configs: list
                             matched_const_name = const_name_list[li]
                     if not matched_const_name:
                         unresolved += 1
+                        if dbg_budget and dbg_printed < dbg_budget:
+                            dbg_const_no_match.append(
+                                {"const_raw": const_name_raw, "cand_raw": cand_name_raw, "url": mynet_url}
+                            )
+                            dbg_printed += 1
                         continue
 
                     constituency_id = next((k for k, v in state_db_consts.items() if v == matched_const_name), None)
                     if not constituency_id:
                         unresolved += 1
+                        if dbg_budget and dbg_printed < dbg_budget:
+                            dbg_const_no_id.append(
+                                {"const_raw": const_name_raw, "const_hit": matched_const_name, "cand_raw": cand_name_raw}
+                            )
+                            dbg_printed += 1
                         continue
                     cands_in_const = [c for c in state_db_cands if c["constituency_id"] == constituency_id]
                     if not cands_in_const:
                         unresolved += 1
+                        if dbg_budget and dbg_printed < dbg_budget:
+                            dbg_no_cands_in_const.append(
+                                {"const_raw": const_name_raw, "const_hit": matched_const_name, "cand_raw": cand_name_raw}
+                            )
+                            dbg_printed += 1
                         continue
 
                     cand_names_in_seat = [c["name"] for c in cands_in_const]
@@ -1706,9 +1774,30 @@ def enrich_candidates_from_myneta(*, headless: bool = True, myneta_configs: list
                             matched_cand_name = cand_names_in_seat[ci]
                     if not matched_cand_name:
                         unresolved += 1
+                        if dbg_budget and dbg_printed < dbg_budget:
+                            # provide top-3 closest ECI names for triage
+                            scored = sorted(
+                                ((c["name"], name_similarity(cand_name_raw, c["name"]), calculate_token_overlap_v2(cand_name_raw, c["name"])) for c in cands_in_const),
+                                key=lambda x: (x[1], x[2]),
+                                reverse=True,
+                            )[:3]
+                            dbg_name_no_match.append(
+                                {
+                                    "const_raw": const_name_raw,
+                                    "const_hit": matched_const_name,
+                                    "myneta_name": cand_name_raw,
+                                    "top": scored,
+                                    "url": mynet_url,
+                                }
+                            )
+                            dbg_printed += 1
                         continue
 
-                    target_cand = next((c for c in cands_in_const if c["name"] == matched_cand_name), None)
+                    # Prefer non-removed rows when multiple exist for the same name.
+                    target_cand = next(
+                        (c for c in cands_in_const if c["name"] == matched_cand_name and not c.get("removed")),
+                        None,
+                    ) or next((c for c in cands_in_const if c["name"] == matched_cand_name), None)
                     if not target_cand:
                         unresolved += 1
                         continue
@@ -1743,6 +1832,23 @@ def enrich_candidates_from_myneta(*, headless: bool = True, myneta_configs: list
                 page_no += 1
 
             print(f"    [OK] Enriched: {merged} | Unresolved: {unresolved}", flush=True)
+            if dbg_budget:
+                if dbg_const_no_match:
+                    print(f"    [dbg] constituency_no_match samples={len(dbg_const_no_match)}", flush=True)
+                    for ex in dbg_const_no_match[: min(10, len(dbg_const_no_match))]:
+                        print(f"      - const='{ex['const_raw']}' cand='{ex['cand_raw']}'", flush=True)
+                if dbg_no_cands_in_const:
+                    print(f"    [dbg] no_db_candidates_in_constituency samples={len(dbg_no_cands_in_const)}", flush=True)
+                    for ex in dbg_no_cands_in_const[: min(10, len(dbg_no_cands_in_const))]:
+                        print(f"      - const='{ex['const_hit']}' (raw='{ex['const_raw']}') cand='{ex['cand_raw']}'", flush=True)
+                if dbg_name_no_match:
+                    print(f"    [dbg] candidate_name_no_match samples={len(dbg_name_no_match)}", flush=True)
+                    for ex in dbg_name_no_match[: min(10, len(dbg_name_no_match))]:
+                        tops = ", ".join([f"{n} (sim={s:.2f}, ov={o:.2f})" for (n, s, o) in ex["top"]])
+                        print(
+                            f"      - const='{ex['const_hit']}' my='{ex['myneta_name']}' -> {tops}",
+                            flush=True,
+                        )
 
         ctx.close()
         browser.close()
@@ -1797,8 +1903,9 @@ def _myneta_worker_run(cfg: dict, *, headless: bool) -> dict:
     # Load only the minimum we need for this state.
     db_candidates = _select(
         "candidates",
-        "id,name,constituency_id",
-        filters={"removed": "eq.false", "constituency_id": f"like.{prefix}-%"},
+        "id,name,constituency_id,removed",
+        # Match against both removed and non-removed candidates (see non-worker path note).
+        filters={"constituency_id": f"like.{prefix}-%"},
         limit=20000,
     )
     db_constituencies = _select(
@@ -1813,6 +1920,11 @@ def _myneta_worker_run(cfg: dict, *, headless: bool) -> dict:
 
     merged = 0
     unresolved = 0
+    dbg_budget = _myneta_debug_budget()
+    dbg_printed = 0
+    dbg_const_no_match: list[dict] = []
+    dbg_no_cands_in_const: list[dict] = []
+    dbg_name_no_match: list[dict] = []
 
     from playwright.sync_api import sync_playwright
 
@@ -1884,6 +1996,9 @@ def _myneta_worker_run(cfg: dict, *, headless: bool) -> dict:
                         matched_const_name = const_name_list[li]
                 if not matched_const_name:
                     unresolved += 1
+                    if dbg_budget and dbg_printed < dbg_budget:
+                        dbg_const_no_match.append({"const_raw": const_name_raw, "cand_raw": cand_name_raw})
+                        dbg_printed += 1
                     continue
 
                 constituency_id = next((k for k, v in state_db_consts.items() if v == matched_const_name), None)
@@ -1893,6 +2008,11 @@ def _myneta_worker_run(cfg: dict, *, headless: bool) -> dict:
                 cands_in_const = [c for c in state_db_cands if c["constituency_id"] == constituency_id]
                 if not cands_in_const:
                     unresolved += 1
+                    if dbg_budget and dbg_printed < dbg_budget:
+                        dbg_no_cands_in_const.append(
+                            {"const_raw": const_name_raw, "const_hit": matched_const_name, "cand_raw": cand_name_raw}
+                        )
+                        dbg_printed += 1
                     continue
 
                 cand_names_in_seat = [c["name"] for c in cands_in_const]
@@ -1913,9 +2033,35 @@ def _myneta_worker_run(cfg: dict, *, headless: bool) -> dict:
                         matched_cand_name = cand_names_in_seat[ci]
                 if not matched_cand_name:
                     unresolved += 1
+                    if dbg_budget and dbg_printed < dbg_budget:
+                        scored = sorted(
+                            (
+                                (
+                                    c["name"],
+                                    name_similarity(cand_name_raw, c["name"]),
+                                    calculate_token_overlap_v2(cand_name_raw, c["name"]),
+                                )
+                                for c in cands_in_const
+                            ),
+                            key=lambda x: (x[1], x[2]),
+                            reverse=True,
+                        )[:3]
+                        dbg_name_no_match.append(
+                            {
+                                "const_raw": const_name_raw,
+                                "const_hit": matched_const_name,
+                                "myneta_name": cand_name_raw,
+                                "top": scored,
+                                "url": mynet_url,
+                            }
+                        )
+                        dbg_printed += 1
                     continue
 
-                target_cand = next((c for c in cands_in_const if c["name"] == matched_cand_name), None)
+                target_cand = next(
+                    (c for c in cands_in_const if c["name"] == matched_cand_name and not c.get("removed")),
+                    None,
+                ) or next((c for c in cands_in_const if c["name"] == matched_cand_name), None)
                 if not target_cand:
                     unresolved += 1
                     continue
@@ -1954,6 +2100,25 @@ def _myneta_worker_run(cfg: dict, *, headless: bool) -> dict:
 
     if not saw_any_rows:
         return {"state": cfg.get("name"), "merged": 0, "unresolved": 0, "error": "myneta_no_rows_parsed"}
+
+    if dbg_budget:
+        print(f"[MyNeta {prefix}] Debug samples requested={dbg_budget}", flush=True)
+        if dbg_const_no_match:
+            print(f"[MyNeta {prefix}]  constituency_no_match samples={len(dbg_const_no_match)}", flush=True)
+            for ex in dbg_const_no_match[: min(10, len(dbg_const_no_match))]:
+                print(f"[MyNeta {prefix}]   - const='{ex['const_raw']}' cand='{ex['cand_raw']}'", flush=True)
+        if dbg_no_cands_in_const:
+            print(f"[MyNeta {prefix}]  no_db_candidates_in_constituency samples={len(dbg_no_cands_in_const)}", flush=True)
+            for ex in dbg_no_cands_in_const[: min(10, len(dbg_no_cands_in_const))]:
+                print(
+                    f"[MyNeta {prefix}]   - const='{ex['const_hit']}' (raw='{ex['const_raw']}') cand='{ex['cand_raw']}'",
+                    flush=True,
+                )
+        if dbg_name_no_match:
+            print(f"[MyNeta {prefix}]  candidate_name_no_match samples={len(dbg_name_no_match)}", flush=True)
+            for ex in dbg_name_no_match[: min(10, len(dbg_name_no_match))]:
+                tops = ", ".join([f"{n} (sim={s:.2f}, ov={o:.2f})" for (n, s, o) in ex["top"]])
+                print(f"[MyNeta {prefix}]   - const='{ex['const_hit']}' my='{ex['myneta_name']}' -> {tops}", flush=True)
 
     return {"state": cfg.get("name"), "merged": merged, "unresolved": unresolved, "error": None}
 

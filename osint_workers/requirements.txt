@@ -8,5 +8,5 @@ feedparser==6.0.11
 python-dotenv
 googlenewsdecoder
 crawl4ai>=0.7.0
-playwright==1.54.0
+playwright>=1.44.0
 pypdf>=5.0.0
