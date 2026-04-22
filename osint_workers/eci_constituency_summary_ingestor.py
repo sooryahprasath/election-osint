@@ -73,6 +73,38 @@ def sb_upsert(table: str, rows: list[dict[str, Any]], on_conflict: str) -> None:
     http_request("POST", endpoint, headers=headers, body=rows)
 
 
+def sb_select(
+    table: str,
+    select: str,
+    *,
+    filters: dict[str, str] | None = None,
+    limit: int = 10000,
+) -> list[dict[str, Any]]:
+    import urllib.parse
+
+    base, key = supabase_env()
+    headers = {"apikey": key, "Authorization": f"Bearer {key}"}
+    step = 1000
+    out: list[dict[str, Any]] = []
+    for offset in range(0, max(0, int(limit)), step):
+        params = {"select": select, "limit": str(step), "offset": str(offset)}
+        if filters:
+            params.update(filters)
+        # Important: PostgREST filter values contain spaces and '%' (like.XXX-%).
+        # Always URL-encode to avoid Cloudflare 1101 / worker exceptions upstream.
+        qs = urllib.parse.urlencode(params, safe="(),.:*+-_", quote_via=urllib.parse.quote)
+        url = f"{base.rstrip('/')}/rest/v1/{table}?{qs}"
+        chunk = http_request("GET", url, headers=headers)
+        if not chunk:
+            break
+        if not isinstance(chunk, list):
+            break
+        out.extend(chunk)
+        if len(chunk) < step:
+            break
+    return out
+
+
 STATE_PREFIX: dict[str, str] = {
     "Tamil Nadu": "TN",
     "Kerala": "KER",
@@ -88,7 +120,16 @@ def parse_index_card_csv(path: Path, *, year: int) -> dict[str, Any] | None:
     with path.open("r", encoding="utf-8-sig", errors="ignore", newline="") as f:
         reader = csv.reader(f)
         for r in reader:
-            rows.append([c.strip() for c in r])
+            rows.append([str(c or "").strip() for c in r])
+    return parse_index_card_rows(rows, year=year, source_note=f"eci_constituency_summary_csv:{path.name}")
+
+
+def parse_index_card_rows(rows_any: list[list[Any]], *, year: int, source_note: str) -> dict[str, Any] | None:
+    """
+    Parse an ECI 'Constituency Data Summary' index-card grid.
+    Works for both CSV exports and XLSX sheets (list-of-lists).
+    """
+    rows: list[list[str]] = [[str(c or "").strip() for c in r] for r in (rows_any or [])]
 
     header = next((r for r in rows if r and r[0].strip().lower() == "state/ut"), None)
     if not header or len(header) < 4:
@@ -119,15 +160,6 @@ def parse_index_card_csv(path: Path, *, year: int) -> dict[str, Any] | None:
     constituency_name_raw = m_ac.group(2).strip()
     constituency_id = f"{STATE_PREFIX[state_name]}-{ac_no:03d}"
 
-    def find_row(prefix: str) -> list[str] | None:
-        for r in rows:
-            if len(r) >= 2 and r[1].strip().lower().startswith(prefix.lower()):
-                return r
-        return None
-
-    electors_total_row = find_row("4. Total")
-    # There are two "4. Total" rows (electors and votes). Disambiguate using section markers.
-    # We'll find the "II. Electors" section and then the first "4. Total" after it.
     electors = None
     voters = None
     poll_pct = None
@@ -174,7 +206,7 @@ def parse_index_card_csv(path: Path, *, year: int) -> dict[str, Any] | None:
         "constituency_id": constituency_id,
         "constituency_name_raw": constituency_name_raw,
         "poll_pct": poll_pct,
-        "source_note": f"eci_constituency_summary_csv:{path.name}",
+        "source_note": source_note,
     }
     if electors:
         out.update(
@@ -197,19 +229,69 @@ def parse_index_card_csv(path: Path, *, year: int) -> dict[str, Any] | None:
     return out
 
 
+def parse_index_card_xlsx(path: Path, *, year: int) -> tuple[list[dict[str, Any]], list[str]]:
+    """
+    XLSX workbooks from ECI often contain one sheet per constituency.
+    We iterate all sheets and parse those that match the index-card structure.
+    """
+    try:
+        from python_calamine import CalamineWorkbook
+    except Exception as e:
+        raise RuntimeError(
+            "missing_dependency: python-calamine is required to read ECI XLSX (openpyxl often fails on invalid styles). "
+            "Run: pip install -r osint_workers/requirements.txt"
+        ) from e
+
+    wb = CalamineWorkbook.from_path(str(path))
+    out: list[dict[str, Any]] = []
+    bad_sheets: list[str] = []
+    for sheet_name in wb.sheet_names:
+        try:
+            grid = wb.get_sheet_by_name(sheet_name).to_python()
+            r = parse_index_card_rows(
+                grid,
+                year=year,
+                source_note=f"eci_constituency_summary_xlsx:{path.name}#{sheet_name}",
+            )
+            if not r:
+                bad_sheets.append(sheet_name)
+                continue
+            out.append(r)
+        except Exception:
+            bad_sheets.append(sheet_name)
+    return out, bad_sheets
+
+
 def main() -> None:
     load_env_files()
     ap = argparse.ArgumentParser(description="Ingest ECI 'Constituency Data Summary' index-card CSV into constituency_electors_summary.")
     ap.add_argument("--year", type=int, default=2021)
     ap.add_argument("--path", type=str, default="")
     ap.add_argument("--dir", type=str, default=str(Path(__file__).resolve().parent / "historical_data"))
+    ap.add_argument(
+        "--report-missing",
+        action="store_true",
+        help="After ingest, print per-state coverage and missing constituency IDs for this year.",
+    )
+    ap.add_argument(
+        "--report-limit",
+        type=int,
+        default=80,
+        help="Max missing constituency IDs to print per state (default 80).",
+    )
     args = ap.parse_args()
 
     if args.path:
         files = [Path(args.path)]
     else:
         d = Path(args.dir)
-        files = sorted(d.glob("8*Constituency*Summary*.csv")) + sorted(d.glob("8*Constituency*Summery*.csv"))
+        # Prefer ECI's common naming, but fall back to all CSVs in the folder.
+        files = (
+            sorted(d.glob("8*Constituency*Summary*.csv"))
+            + sorted(d.glob("8*Constituency*Summery*.csv"))
+        )
+        if not files:
+            files = sorted(d.glob("*.csv")) + sorted(d.glob("*.xlsx"))
 
     if not files:
         raise SystemExit("no_input_files: place CSVs in osint_workers/historical_data or pass --path")
@@ -219,14 +301,23 @@ def main() -> None:
     rows: list[dict[str, Any]] = []
     for fp in files:
         try:
-            r = parse_index_card_csv(fp, year=args.year)
-            if not r:
-                bad.append(fp.name)
-                continue
-            rows.append(r)
-            ok += 1
+            if fp.suffix.lower() == ".xlsx":
+                parsed, bad_sheets = parse_index_card_xlsx(fp, year=args.year)
+                rows.extend(parsed)
+                ok += len(parsed)
+                if bad_sheets and len(parsed) == 0:
+                    bad.append(fp.name)
+            else:
+                r = parse_index_card_csv(fp, year=args.year)
+                if not r:
+                    bad.append(fp.name)
+                    continue
+                rows.append(r)
+                ok += 1
         except Exception:
             bad.append(fp.name)
+
+    parsed_states = sorted({str(r.get("state") or "").strip() for r in rows if str(r.get("state") or "").strip()})
 
     # Deduplicate by PK
     uniq: dict[tuple[str, int, str], dict[str, Any]] = {}
@@ -243,6 +334,41 @@ def main() -> None:
     print(f"ingested={len(rows)} parsed_ok={ok} bad={len(bad)} seconds={dt:.2f}")
     if bad:
         print("bad_files:", ", ".join(bad[:50]))
+
+    if args.report_missing:
+        year = int(args.year)
+        states_to_report = parsed_states or sorted(STATE_PREFIX.keys())
+        print(f"[report] year={year} states={states_to_report}")
+        for state in states_to_report:
+            try:
+                prefix = STATE_PREFIX.get(state)
+                if not prefix:
+                    continue
+                consts = sb_select(
+                    "constituencies",
+                    "id",
+                    filters={"id": f"like.{prefix}-%"},
+                    limit=10000,
+                )
+                expected = sorted({str(c.get("id") or "") for c in consts if str(c.get("id") or "")})
+                have_rows = sb_select(
+                    "constituency_electors_summary",
+                    "constituency_id",
+                    filters={
+                        "state": f"eq.{state}",
+                        "election_year": f"eq.{year}",
+                    },
+                    limit=20000,
+                )
+                have = {str(r.get("constituency_id") or "") for r in have_rows if str(r.get("constituency_id") or "")}
+                missing = [cid for cid in expected if cid not in have]
+                print(f"[report] {state}: have={len(have)}/{len(expected)} missing={len(missing)}")
+                if missing:
+                    lim = max(0, int(args.report_limit or 0))
+                    show = missing if lim <= 0 else missing[:lim]
+                    print(f"         missing_ids: {', '.join(show)}" + ("" if len(show) == len(missing) else f" … (+{len(missing) - len(show)} more)"))
+            except Exception as e:
+                print(f"[report] {state}: error={e}")
 
 
 if __name__ == "__main__":

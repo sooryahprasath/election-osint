@@ -54,50 +54,71 @@ export default function CenterPane({
 }) {
   if (mode === "signals")
     return (
-      <SignalsCenterPane
-        globalStateFilter={globalStateFilter}
-        setGlobalStateFilter={onChangeGlobalStateFilter}
-        globalConstituencyId={globalConstituencyId}
-        onSelectSignal={(s) => setActiveSignal(s)}
-      />
+      <div data-view="news" className="h-full min-h-0">
+        <SignalsCenterPane
+          globalStateFilter={globalStateFilter}
+          setGlobalStateFilter={onChangeGlobalStateFilter}
+          globalConstituencyId={globalConstituencyId}
+          onSelectSignal={(s) => setActiveSignal(s)}
+        />
+      </div>
     );
-  if (mode === "videos") return <VideosCenterPane globalStateFilter={globalStateFilter} onSelectSignal={(s) => setActiveSignal(s)} />;
-  if (mode === "live") return <LiveCenterPane activeTab={liveTab} onChangeTab={onChangeLiveTab} />;
-  if (mode === "polls") return <OpinionPollsPane />;
+  if (mode === "videos")
+    return (
+      <div data-view="videos" className="h-full min-h-0">
+        <VideosCenterPane globalStateFilter={globalStateFilter} onSelectSignal={(s) => setActiveSignal(s)} />
+      </div>
+    );
+  if (mode === "live")
+    return (
+      <div data-view="live" className="h-full min-h-0">
+        <LiveCenterPane activeTab={liveTab} onChangeTab={onChangeLiveTab} />
+      </div>
+    );
+  if (mode === "polls")
+    return (
+      <div data-view="polls" className="h-full min-h-0">
+        <OpinionPollsPane />
+      </div>
+    );
   if (mode === "insights")
     return (
-      <InsightsCenterPane
-        globalStateFilter={globalStateFilter}
-        globalConstituencyId={globalConstituencyId}
-        onChangeGlobalStateFilter={onChangeGlobalStateFilter}
-        onSelectConstituency={(id) => setGlobalConstituencyId(id)}
-      />
+      <div data-view="insights" className="h-full min-h-0 overflow-y-auto">
+        <InsightsCenterPane
+          globalStateFilter={globalStateFilter}
+          globalConstituencyId={globalConstituencyId}
+          onChangeGlobalStateFilter={onChangeGlobalStateFilter}
+          onSelectConstituency={(id) => setGlobalConstituencyId(id)}
+        />
+      </div>
     );
 
   return (
-    <IndiaMap
-      flyToState={flyToState}
-      activeState={globalStateFilter}
-      activeConstituencyId={globalConstituencyId}
-      onSelectConstituency={(id) => {
-        setGlobalConstituencyId(id);
-      }}
-      onSelectState={(s) => {
-        setGlobalConstituencyId(null);
-        onChangeGlobalStateFilter(s);
-        setFlyToState(s === "ALL" ? "India" : s);
-      }}
-      onSelectSignal={setActiveSignal}
-      onSelectSignalCluster={setActiveClusterSignals}
-      mobilePane={mobilePaneForMapChrome}
-      resetTrigger={resetTrigger}
-      stateViewSnapTrigger={stateViewSnapTrigger}
-      onZoomChange={onZoomChange}
-      overlayMode={mapOverlayMode}
-      verifiedOnly={mapVerifiedOnly}
-      onChangeOverlayMode={setMapOverlayMode}
-      onToggleVerifiedOnly={toggleMapVerifiedOnly}
-    />
+    <div data-view="map" className="h-full min-h-0">
+      <IndiaMap
+        flyToState={flyToState}
+        activeState={globalStateFilter}
+        activeConstituencyId={globalConstituencyId}
+        onSelectConstituency={(id) => {
+          setGlobalConstituencyId(id);
+        }}
+        onSelectState={(s) => {
+          setGlobalConstituencyId(null);
+          onChangeGlobalStateFilter(s);
+          setFlyToState(s === "ALL" ? "India" : s);
+        }}
+        onSelectSignal={setActiveSignal}
+        onSelectSignalCluster={setActiveClusterSignals}
+        mobilePane={mobilePaneForMapChrome}
+        resetTrigger={resetTrigger}
+        stateViewSnapTrigger={stateViewSnapTrigger}
+        onZoomChange={onZoomChange}
+        overlayMode={mapOverlayMode}
+        verifiedOnly={mapVerifiedOnly}
+        onChangeOverlayMode={setMapOverlayMode}
+        onToggleVerifiedOnly={toggleMapVerifiedOnly}
+      />
+    </div>
   );
 }
 

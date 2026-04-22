@@ -1435,6 +1435,7 @@ def fetch_myneta_summary_rows(pw_page, base: str, page: int) -> list[dict]:
 
         cand_name = tds[1].get_text(" ", strip=True)
         const_name = tds[2].get_text(" ", strip=True)
+        party_raw = tds[3].get_text(" ", strip=True) if len(tds) > 3 else ""
         criminal_raw = tds[4].get_text(" ", strip=True) if len(tds) > 4 else "0"
         edu_raw = tds[5].get_text(" ", strip=True) if len(tds) > 5 else ""
 
@@ -1450,6 +1451,7 @@ def fetch_myneta_summary_rows(pw_page, base: str, page: int) -> list[dict]:
         rows.append({
             "candidate_name": cand_name,
             "constituency_name": const_name,
+            "party": party_raw,
             "myneta_candidate_id": cand_id,
             "myneta_url": candidate_url,
             "criminal_cases": criminal_cases,
@@ -1626,19 +1628,63 @@ def enrich_candidates_from_myneta(*, headless: bool = True, myneta_configs: list
         print(
             f"    [~] LLM fallback enabled (max {_LLM_MAX} calls, model={os.getenv('DOSSIER_LLM_MODEL', 'gemini-2.5-flash')})"
         )
+    missing_only = os.getenv("MYNETA_MISSING_ONLY", "").lower() in ("1", "true", "yes")
+    max_updates = int(os.getenv("MYNETA_MAX_UPDATES", "0") or "0")  # 0 = unlimited
+
+    def _norm_party_db(party: str) -> str:
+        p = (party or "").strip().lower()
+        if not p:
+            return ""
+        if p in ("ind", "independent"):
+            return "IND"
+        # Common expansions/aliases seen in ECI / candidate DB
+        if "all india trinamool congress" in p or "trinamool congress" in p:
+            return "AITC"
+        # Common expansions seen in ECI
+        if "all india anna dravida munnetra kazhagam" in p:
+            return "AIADMK"
+        if "dravida munnetra kazhagam" in p and "anna" not in p:
+            return "DMK"
+        if "bharatiya janata" in p:
+            return "BJP"
+        if "indian national congress" in p or p == "congress":
+            return "INC"
+        if "communist party of india (marxist)" in p or p == "cpi(m)":
+            return "CPIM"
+        if "communist party of india" in p:
+            return "CPI"
+        return (party or "").strip().upper()
+
+    def _norm_party_myneta(party: str) -> str:
+        p = (party or "").strip().upper()
+        if p in ("", "-", "N/A"):
+            return ""
+        # MyNeta uses short codes, but has a few known synonyms across years/states.
+        if p == "TMC":
+            return "AITC"
+        if p in ("IND", "INDEPENDENT"):
+            return "IND"
+        return p
 
     def _select_all(*, table: str, select: str, filters: dict[str, str], step: int, hard_cap: int) -> list[dict]:
         rows: list[dict] = []
         offset = 0
         while offset < hard_cap:
-            chunk = sb_select(table, select, filters=filters, limit=step, offset=offset)
+            # Supabase/PostgREST often enforces a hard per-request cap (commonly 1000),
+            # regardless of the requested limit. Always advance by the number of rows
+            # actually returned to avoid skipping large ranges.
+            req_limit = min(int(step or 0) or 1000, 1000)
+            chunk = sb_select(table, select, filters=filters, limit=req_limit, offset=offset)
             if not chunk:
                 break
             rows.extend(chunk)
-            if len(chunk) < step:
+            if len(chunk) < req_limit:
                 break
-            offset += step
+            offset += len(chunk)
         return rows
+
+    def _chunked(items: list[dict], n: int) -> list[list[dict]]:
+        return [items[i : i + n] for i in range(0, len(items), n)]
 
     from playwright.sync_api import sync_playwright
 
@@ -1668,7 +1714,7 @@ def enrich_candidates_from_myneta(*, headless: bool = True, myneta_configs: list
             )
             db_candidates = _select_all(
                 table="candidates",
-                select="id,name,constituency_id,removed",
+                select="id,name,constituency_id,party,nomination_status,is_independent,removed,myneta_last_synced_at,myneta_url,myneta_candidate_id",
                 # IMPORTANT: match against both removed and non-removed candidates.
                 # The ECI pipeline may temporarily mark candidates as removed (status timing / partial scrapes),
                 # but MyNeta already lists them; excluding removed rows causes massive false "no match".
@@ -1686,12 +1732,79 @@ def enrich_candidates_from_myneta(*, headless: bool = True, myneta_configs: list
 
             merged = 0
             unresolved = 0
+            scanned = 0
+            skipped_already_enriched = 0
             dbg_budget = _myneta_debug_budget()
             dbg_printed = 0
             dbg_const_no_match: list[dict] = []
             dbg_const_no_id: list[dict] = []
             dbg_no_cands_in_const: list[dict] = []
             dbg_name_no_match: list[dict] = []
+
+            # If missing-only is enabled, restrict matching to the subset of candidates lacking MyNeta fields.
+            missing_by_const: dict[str, list[dict]] = {}
+            if missing_only:
+                for c in state_db_cands:
+                    has_m = bool(c.get("myneta_last_synced_at")) or bool(c.get("myneta_url")) or bool(c.get("myneta_candidate_id"))
+                    if has_m:
+                        continue
+                    cid = c.get("constituency_id")
+                    if cid:
+                        missing_by_const.setdefault(str(cid), []).append(c)
+                missing_total = sum(len(v) for v in missing_by_const.values())
+                print(f"    [i] missing_only=1 — candidates_missing_myneta={missing_total}", flush=True)
+                # Show a few examples so we can verify names/constituencies quickly.
+                examples = []
+                for cid, items in list(missing_by_const.items())[:12]:
+                    for it in items[:2]:
+                        examples.append({"constituency_id": cid, "id": it.get("id"), "name": it.get("name")})
+                        if len(examples) >= 12:
+                            break
+                    if len(examples) >= 12:
+                        break
+                if examples:
+                    print(f"    [i] missing_examples: {examples}", flush=True)
+            missing_constituency_ids = set(missing_by_const.keys()) if missing_only else set()
+
+            # Optional: focus troubleshooting on specific candidate names.
+            # This makes it practical to debug obvious cases (e.g., "Mamata Banerjee", "M. K. Stalin")
+            # without crawling + updating hundreds of candidates.
+            focus_raw = os.getenv("MYNETA_FOCUS_NAMES", "").strip()
+            focus_terms = [t.strip().lower() for t in focus_raw.split(",") if t.strip()]
+            focus_remaining_ids: set[str] = set()
+            if missing_only and focus_terms:
+                kept: dict[str, list[dict]] = {}
+                for cid, items in missing_by_const.items():
+                    hits = [c for c in items if any(term in str(c.get("name") or "").lower() for term in focus_terms)]
+                    if hits:
+                        kept[cid] = hits
+                        for c in hits:
+                            if c.get("id"):
+                                focus_remaining_ids.add(str(c["id"]))
+                missing_by_const = kept
+                missing_constituency_ids = set(missing_by_const.keys())
+                print(
+                    f"    [i] focus_names={focus_terms} -> focus_missing_candidates={len(focus_remaining_ids)} across_constituencies={len(missing_constituency_ids)}",
+                    flush=True,
+                )
+                if not focus_remaining_ids:
+                    print("    [i] focus_names matched 0 missing candidates; nothing to do.", flush=True)
+                    continue
+
+            # Batch updates (far fewer Supabase requests than per-row PATCH).
+            pending_updates: list[dict] = []
+
+            def _flush_updates() -> None:
+                nonlocal pending_updates
+                if not pending_updates:
+                    return
+                # Deduplicate by id (keep latest payload)
+                uniq = {u["id"]: u for u in pending_updates if u.get("id")}
+                rows2 = list(uniq.values())
+                for chunk in _chunked(rows2, 60):
+                    sb_upsert("candidates", chunk, on_conflict="id")
+                    time.sleep(0.15)
+                pending_updates = []
 
             page_no = 1
             empty_streak = 0
@@ -1717,10 +1830,12 @@ def enrich_candidates_from_myneta(*, headless: bool = True, myneta_configs: list
                 empty_streak = 0
 
                 for row in rows:
+                    scanned += 1
                     const_name_raw = row["constituency_name"]
                     cand_name_raw = row["candidate_name"]
                     mynet_url = row["myneta_url"]
                     mynet_cid = row["myneta_candidate_id"]
+                    party_m = _norm_party_myneta(row.get("party") or "")
 
                     const_name_list = sorted(set(state_db_consts.values()))
                     matched_const_name = best_constituency_name_match(const_name_raw, const_name_list)
@@ -1746,9 +1861,14 @@ def enrich_candidates_from_myneta(*, headless: bool = True, myneta_configs: list
                             )
                             dbg_printed += 1
                         continue
+                    if missing_only and constituency_id not in missing_constituency_ids:
+                        # Skip entire constituencies that already have full MyNeta coverage.
+                        skipped_already_enriched += 1
+                        continue
+                    # Always match against full seat candidate set; missing-only only affects whether we WRITE.
                     cands_in_const = [c for c in state_db_cands if c["constituency_id"] == constituency_id]
                     if not cands_in_const:
-                        unresolved += 1
+                        skipped_already_enriched += 1
                         if dbg_budget and dbg_printed < dbg_budget:
                             dbg_no_cands_in_const.append(
                                 {"const_raw": const_name_raw, "const_hit": matched_const_name, "cand_raw": cand_name_raw}
@@ -1801,7 +1921,18 @@ def enrich_candidates_from_myneta(*, headless: bool = True, myneta_configs: list
                     if not target_cand:
                         unresolved += 1
                         continue
+                    if party_m:
+                        dbp = _norm_party_db(target_cand.get("party") or "")
+                        if dbp and dbp != party_m and party_m != "IND":
+                            # Party mismatch (usually means same name in seat but different person)
+                            unresolved += 1
+                            continue
                     target_cand_id = target_cand["id"]
+                    if missing_only:
+                        has_m = bool(target_cand.get("myneta_last_synced_at")) or bool(target_cand.get("myneta_url")) or bool(target_cand.get("myneta_candidate_id"))
+                        if has_m:
+                            skipped_already_enriched += 1
+                            continue
 
                     try:
                         prof = fetch_myneta_profile(mynet_url, pw_page)
@@ -1815,6 +1946,14 @@ def enrich_candidates_from_myneta(*, headless: bool = True, myneta_configs: list
                     education = prof.get("education_detail") or row.get("education") or ""
 
                     payload = {
+                        "id": target_cand_id,
+                        # Include NOT NULL / identity fields so upsert never violates schema.
+                        "constituency_id": target_cand.get("constituency_id"),
+                        "name": target_cand.get("name"),
+                        "party": target_cand.get("party"),
+                        "nomination_status": target_cand.get("nomination_status"),
+                        "is_independent": target_cand.get("is_independent"),
+                        "removed": target_cand.get("removed"),
                         "criminal_cases": criminal_cases,
                         "education": education,
                         "assets_value": prof.get("assets_value", 0),
@@ -1825,13 +1964,46 @@ def enrich_candidates_from_myneta(*, headless: bool = True, myneta_configs: list
                         "background": f"Data verified via ADR MyNeta. Candidate holds {prof.get('assets_value', 0)} INR in declared assets.",
                     }
 
-                    sb_update("candidates", payload, filters={"id": f"eq.{target_cand_id}"})
+                    pending_updates.append(payload)
                     merged += 1
+                    if focus_remaining_ids and target_cand_id in focus_remaining_ids:
+                        focus_remaining_ids.discard(target_cand_id)
+                    if missing_only:
+                        # Remove from missing index so we stop trying to match again
+                        try:
+                            missing_by_const[constituency_id] = [c for c in missing_by_const.get(constituency_id, []) if c.get("id") != target_cand_id]
+                        except Exception:
+                            pass
+                        if focus_terms and not focus_remaining_ids:
+                            _flush_updates()
+                            print("    [STOP] Focus candidates enriched; stopping early.", flush=True)
+                            page_no = max_pages + 999
+                            break
+
+                    if merged % 40 == 0:
+                        _flush_updates()
+                        print(f"    [..] Progress: merged={merged} unresolved={unresolved} scanned={scanned}", flush=True)
+                    if max_updates > 0 and merged >= max_updates:
+                        print(f"    [STOP] Reached MYNETA_MAX_UPDATES={max_updates}", flush=True)
+                        break
 
                 time.sleep(0.4)
                 page_no += 1
+                if max_updates > 0 and merged >= max_updates:
+                    break
+
+            _flush_updates()
 
             print(f"    [OK] Enriched: {merged} | Unresolved: {unresolved}", flush=True)
+            print(f"    [i] Scanned MyNeta rows: {scanned} | skipped_already_enriched={skipped_already_enriched}", flush=True)
+            if missing_only:
+                remaining = []
+                for cid, items in missing_by_const.items():
+                    for it in items:
+                        remaining.append({"constituency_id": cid, "id": it.get("id"), "name": it.get("name")})
+                if remaining:
+                    print(f"    [!] missing_only: still_missing_after_run={len(remaining)} (not found on MyNeta listing?)", flush=True)
+                    print(f"    [!] missing_remaining_sample={remaining[:25]}", flush=True)
             if dbg_budget:
                 if dbg_const_no_match:
                     print(f"    [dbg] constituency_no_match samples={len(dbg_const_no_match)}", flush=True)
@@ -1895,6 +2067,16 @@ def _myneta_worker_run(cfg: dict, *, headless: bool) -> dict:
 
     def _update(table: str, payload: dict, *, filters: dict[str, str]):
         _req("PATCH", table, params=filters, payload=payload, extra_headers={"Prefer": "return=minimal"})
+    def _upsert(table: str, rows: list[dict], *, on_conflict: str = "id"):
+        if not rows:
+            return
+        _req(
+            "POST",
+            table,
+            params={"on_conflict": on_conflict},
+            payload=rows,
+            extra_headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
+        )
 
     prefix = cfg["prefix"]
     base = cfg["base"]
@@ -1903,7 +2085,7 @@ def _myneta_worker_run(cfg: dict, *, headless: bool) -> dict:
     # Load only the minimum we need for this state.
     db_candidates = _select(
         "candidates",
-        "id,name,constituency_id,removed",
+        "id,name,constituency_id,party,nomination_status,is_independent,removed,myneta_last_synced_at,myneta_url,myneta_candidate_id",
         # Match against both removed and non-removed candidates (see non-worker path note).
         filters={"constituency_id": f"like.{prefix}-%"},
         limit=20000,
@@ -1920,6 +2102,8 @@ def _myneta_worker_run(cfg: dict, *, headless: bool) -> dict:
 
     merged = 0
     unresolved = 0
+    scanned = 0
+    skipped_already_enriched = 0
     dbg_budget = _myneta_debug_budget()
     dbg_printed = 0
     dbg_const_no_match: list[dict] = []
@@ -1982,7 +2166,29 @@ def _myneta_worker_run(cfg: dict, *, headless: bool) -> dict:
             last_good_page = page_no
             print(f"[MyNeta {prefix}] page {page_no}: {len(rows)} rows", flush=True)
 
+            # missing-only (worker): skip candidates already enriched
+            missing_only = os.getenv("MYNETA_MISSING_ONLY", "").lower() in ("1", "true", "yes")
+            missing_by_const: dict[str, list[dict]] = {}
+            if missing_only:
+                for c in state_db_cands:
+                    has_m = bool(c.get("myneta_last_synced_at")) or bool(c.get("myneta_url")) or bool(c.get("myneta_candidate_id"))
+                    if has_m:
+                        continue
+                    cid = c.get("constituency_id")
+                    if cid:
+                        missing_by_const.setdefault(str(cid), []).append(c)
+
+            pending: list[dict] = []
+            def _flush():
+                nonlocal pending
+                if not pending:
+                    return
+                uniq = {u["id"]: u for u in pending if u.get("id")}
+                _upsert("candidates", list(uniq.values()), on_conflict="id")
+                pending = []
+
             for row in rows:
+                scanned += 1
                 const_name_raw = row["constituency_name"]
                 cand_name_raw = row["candidate_name"]
                 mynet_url = row["myneta_url"]
@@ -2007,7 +2213,7 @@ def _myneta_worker_run(cfg: dict, *, headless: bool) -> dict:
                     continue
                 cands_in_const = [c for c in state_db_cands if c["constituency_id"] == constituency_id]
                 if not cands_in_const:
-                    unresolved += 1
+                    skipped_already_enriched += 1
                     if dbg_budget and dbg_printed < dbg_budget:
                         dbg_no_cands_in_const.append(
                             {"const_raw": const_name_raw, "const_hit": matched_const_name, "cand_raw": cand_name_raw}
@@ -2066,6 +2272,11 @@ def _myneta_worker_run(cfg: dict, *, headless: bool) -> dict:
                     unresolved += 1
                     continue
                 target_cand_id = target_cand["id"]
+                if missing_only:
+                    has_m = bool(target_cand.get("myneta_last_synced_at")) or bool(target_cand.get("myneta_url")) or bool(target_cand.get("myneta_candidate_id"))
+                    if has_m:
+                        skipped_already_enriched += 1
+                        continue
 
                 try:
                     prof = fetch_myneta_profile(mynet_url, pw_page)
@@ -2079,6 +2290,13 @@ def _myneta_worker_run(cfg: dict, *, headless: bool) -> dict:
                 education = prof.get("education_detail") or row.get("education") or ""
 
                 payload = {
+                    "id": target_cand_id,
+                    "constituency_id": target_cand.get("constituency_id"),
+                    "name": target_cand.get("name"),
+                    "party": target_cand.get("party"),
+                    "nomination_status": target_cand.get("nomination_status"),
+                    "is_independent": target_cand.get("is_independent"),
+                    "removed": target_cand.get("removed"),
                     "criminal_cases": criminal_cases,
                     "education": education,
                     "assets_value": prof.get("assets_value", 0),
@@ -2089,11 +2307,20 @@ def _myneta_worker_run(cfg: dict, *, headless: bool) -> dict:
                     "background": f"Data verified via ADR MyNeta. Candidate holds {prof.get('assets_value', 0)} INR in declared assets.",
                 }
 
-                _update("candidates", payload, filters={"id": f"eq.{target_cand_id}"})
+                pending.append(payload)
                 merged += 1
+                if missing_only:
+                    try:
+                        missing_by_const[constituency_id] = [c for c in missing_by_const.get(constituency_id, []) if c.get("id") != target_cand_id]
+                    except Exception:
+                        pass
+
+                if merged % 40 == 0:
+                    _flush()
 
             time.sleep(0.25)
             page_no += 1
+            _flush()
 
         ctx.close()
         browser.close()
@@ -2120,7 +2347,179 @@ def _myneta_worker_run(cfg: dict, *, headless: bool) -> dict:
                 tops = ", ".join([f"{n} (sim={s:.2f}, ov={o:.2f})" for (n, s, o) in ex["top"]])
                 print(f"[MyNeta {prefix}]   - const='{ex['const_hit']}' my='{ex['myneta_name']}' -> {tops}", flush=True)
 
-    return {"state": cfg.get("name"), "merged": merged, "unresolved": unresolved, "error": None}
+    return {"state": cfg.get("name"), "merged": merged, "unresolved": unresolved, "scanned": scanned, "skipped_already_enriched": skipped_already_enriched, "error": None}
+
+
+def _myneta_listing_rows_for_state(*, base: str, headless: bool, max_pages: int) -> list[dict]:
+    """
+    Crawl MyNeta candidates_analyzed listing once (single Playwright session) and return all rows.
+    """
+    from playwright.sync_api import sync_playwright
+
+    all_rows: list[dict] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=headless)
+        ctx = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 900},
+        )
+        page = ctx.new_page()
+        empty_streak = 0
+        for page_no in range(1, max_pages + 1):
+            try:
+                rows = fetch_myneta_summary_rows(page, base, page_no)
+            except Exception:
+                empty_streak += 1
+                if empty_streak >= max(1, PAGINATION_EMPTY_STREAK_STOP):
+                    break
+                continue
+            if not rows:
+                empty_streak += 1
+                if empty_streak >= max(1, PAGINATION_EMPTY_STREAK_STOP):
+                    break
+                continue
+            empty_streak = 0
+            all_rows.extend(rows)
+        ctx.close()
+        browser.close()
+    return all_rows
+
+
+def verify_missing_myneta_for_states(*, myneta_cfgs: list[dict], headless: bool, limit: int) -> None:
+    """
+    Verify whether DB candidates missing MyNeta fields exist in the MyNeta analyzed listing.
+    Prints FOUND/NOT_FOUND with best-match hints (no writes).
+    """
+    if not supabase:
+        print("CRITICAL: Supabase offline.", flush=True)
+        return
+
+    def _norm_party_db(party: str) -> str:
+        p = (party or "").strip().lower()
+        if not p:
+            return ""
+        if p in ("ind", "independent"):
+            return "IND"
+        if "all india trinamool congress" in p or "trinamool congress" in p:
+            return "AITC"
+        if "all india anna dravida munnetra kazhagam" in p:
+            return "AIADMK"
+        if "dravida munnetra kazhagam" in p and "anna" not in p:
+            return "DMK"
+        if "bharatiya janata" in p:
+            return "BJP"
+        if "indian national congress" in p or p == "congress":
+            return "INC"
+        if "communist party of india (marxist)" in p or p == "cpi(m)":
+            return "CPIM"
+        if "communist party of india" in p:
+            return "CPI"
+        return (party or "").strip().upper()
+
+    def _norm_party_myneta(party: str) -> str:
+        p = (party or "").strip().upper()
+        if p in ("", "-", "N/A"):
+            return ""
+        if p == "TMC":
+            return "AITC"
+        if p in ("IND", "INDEPENDENT"):
+            return "IND"
+        return p
+
+    def _select_all(*, table: str, select: str, filters: dict[str, str], hard_cap: int) -> list[dict]:
+        rows: list[dict] = []
+        offset = 0
+        while offset < hard_cap:
+            chunk = sb_select(table, select, filters=filters, limit=1000, offset=offset)
+            if not chunk:
+                break
+            rows.extend(chunk)
+            if len(chunk) < 1000:
+                break
+            offset += len(chunk)
+        return rows
+
+    lim = max(0, int(limit or 0))
+    for cfg in myneta_cfgs:
+        state_name = cfg["name"]
+        prefix = cfg["prefix"]
+        base = cfg["base"]
+        print(f"\n======================================", flush=True)
+        print(f" MYNETA VERIFY: {state_name.upper()} (missing-only candidates)", flush=True)
+        print(f"======================================", flush=True)
+
+        db_candidates = _select_all(
+            table="candidates",
+            select="id,name,constituency_id,party,myneta_url,myneta_candidate_id,myneta_last_synced_at,removed",
+            filters={"constituency_id": f"like.{prefix}-%"},
+            hard_cap=200000,
+        )
+        missing = [
+            c
+            for c in (db_candidates or [])
+            if not (c.get("myneta_url") or c.get("myneta_candidate_id") or c.get("myneta_last_synced_at"))
+        ]
+        missing = [c for c in missing if not c.get("removed")]
+        if lim > 0:
+            missing = missing[:lim]
+        print(f"[verify] db_missing={len(missing)} (limit={lim or 'inf'})", flush=True)
+        if not missing:
+            continue
+
+        consts = _select_all(
+            table="constituencies",
+            select="id,name",
+            filters={"id": f"like.{prefix}-%"},
+            hard_cap=20000,
+        )
+        const_name_by_id = {c["id"]: c.get("name") for c in (consts or []) if c.get("id")}
+
+        listing = _myneta_listing_rows_for_state(base=base, headless=headless, max_pages=60)
+        print(f"[verify] myneta_rows={len(listing)}", flush=True)
+
+        by_const: dict[str, list[dict]] = {}
+        for r in listing:
+            cn = str(r.get("constituency_name") or "").strip()
+            by_const.setdefault(cn, []).append(r)
+
+        const_labels = list(by_const.keys())
+
+        for c in missing:
+            cid = str(c.get("constituency_id") or "")
+            db_name = str(c.get("name") or "")
+            db_party = _norm_party_db(str(c.get("party") or ""))
+            seat_name = str(const_name_by_id.get(cid) or "").strip()
+
+            const_hit = best_constituency_name_match(seat_name, const_labels) if seat_name else None
+            if not const_hit:
+                print(f"[verify] NOT_FOUND const_match: {cid} db='{db_name}' seat='{seat_name}'", flush=True)
+                continue
+
+            rows = by_const.get(const_hit) or []
+            if db_party and db_party != "IND":
+                rows_p = [r for r in rows if _norm_party_myneta(r.get("party") or "") == db_party]
+                if rows_p:
+                    rows = rows_p
+
+            opts = [str(r.get("candidate_name") or "") for r in rows]
+            hit_name = intelligent_match(db_name, opts)
+            if hit_name:
+                rr = next((x for x in rows if str(x.get("candidate_name") or "") == hit_name), None) or {}
+                print(
+                    f"[verify] FOUND {cid} db='{db_name}' party='{db_party}' -> my='{hit_name}' const='{const_hit}' url='{rr.get('myneta_url')}'",
+                    flush=True,
+                )
+                continue
+
+            scored = sorted(
+                ((o, name_similarity(db_name, o), calculate_token_overlap_v2(db_name, o)) for o in opts),
+                key=lambda x: (x[1], x[2]),
+                reverse=True,
+            )[:3]
+            print(
+                f"[verify] NOT_FOUND {cid} db='{db_name}' party='{db_party}' seat='{seat_name}' const='{const_hit}' top={scored}",
+                flush=True,
+            )
 
 
 def main() -> None:
@@ -2153,6 +2552,22 @@ def main() -> None:
         "--myneta-visible",
         action="store_true",
         help="Show Chromium for MyNeta pages (default: headless).",
+    )
+    parser.add_argument(
+        "--myneta-missing-only",
+        action="store_true",
+        help="Only attempt MyNeta enrichment for DB candidates that do not yet have MyNeta fields.",
+    )
+    parser.add_argument(
+        "--myneta-verify-missing",
+        action="store_true",
+        help="Verify missing-MyNeta DB candidates against MyNeta analyzed listing (no writes).",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Limit number of missing candidates to verify (use with --myneta-verify-missing). 0=unlimited.",
     )
     parser.add_argument(
         "--myneta-workers",
@@ -2268,6 +2683,16 @@ def main() -> None:
                 flush=True,
             )
             return
+        if args.myneta_verify_missing:
+            verify_missing_myneta_for_states(
+                myneta_cfgs=myneta_cfgs,
+                headless=not args.myneta_visible,
+                limit=int(args.limit or 0),
+            )
+            print("\n[OK] MYNETA VERIFY COMPLETE.")
+            return
+        if args.myneta_missing_only:
+            os.environ["MYNETA_MISSING_ONLY"] = "1"
         if args.cleanup_education:
             cleanup_bad_education_fields(dry_run=args.cleanup_dry_run)
         if int(args.myneta_workers or 1) <= 1:

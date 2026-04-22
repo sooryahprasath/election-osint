@@ -17,8 +17,8 @@ import {
   shouldShowWarRoomCenterTab,
 } from "@/lib/utils/centerDefaultMode";
 
-const TOPBAR_H = 36;
-const SIDEBAR_W = 280;
+const TOPBAR_H = 40;
+const SIDEBAR_W = 288;
 
 export default function Home() {
   type Signal = Record<string, unknown>;
@@ -33,8 +33,6 @@ export default function Home() {
   const [moreOpen, setMoreOpen] = useState(false);
   const [liveTab, setLiveTab] = useState<"TURNOUT" | "EXIT_POLLS">("TURNOUT");
   const [mapActionsOpen, setMapActionsOpen] = useState(false);
-  // Tracks whether the Intel pane was opened from the map chrome on mobile.
-  const [, setIntelBackToMap] = useState(false);
   const mapActionsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -57,14 +55,21 @@ export default function Home() {
   /** Bump to snap map camera back to default for current state (without going national). */
   const [stateViewSnapTrigger, setStateViewSnapTrigger] = useState(0);
 
-  /** Map reset chrome: only show when Map is the active center mode. */
-  const [isMdUp, setIsMdUp] = useState(false);
+  /** 3-pane at lg (1024px+); 2-pane at tablet (820–1023px): centre + Intel only */
+  const [isMdUp, setIsMdUp] = useState(false);     // 1024px+ → 3-pane
+  const [isTabletUp, setIsTabletUp] = useState(false); // 820px+ → 2-pane (centre + Intel)
   useEffect(() => {
-    const mq = window.matchMedia("(min-width: 768px)");
-    const apply = () => setIsMdUp(mq.matches);
-    apply();
-    mq.addEventListener("change", apply);
-    return () => mq.removeEventListener("change", apply);
+    const lgMq = window.matchMedia("(min-width: 1024px)");
+    const tabMq = window.matchMedia("(min-width: 820px)");
+    const applyLg  = () => setIsMdUp(lgMq.matches);
+    const applyTab = () => setIsTabletUp(tabMq.matches);
+    applyLg(); applyTab();
+    lgMq.addEventListener("change", applyLg);
+    tabMq.addEventListener("change", applyTab);
+    return () => {
+      lgMq.removeEventListener("change", applyLg);
+      tabMq.removeEventListener("change", applyTab);
+    };
   }, []);
 
   /** One-shot per mount: center default from calendar (Signals vs Live); refresh repeats. */
@@ -98,20 +103,18 @@ export default function Home() {
     setGlobalConstituencyId(null);
     setFlyToState("India");
     setResetTrigger(prev => prev + 1); // Triggers the map to completely reset viewport
-    if (typeof window !== "undefined" && window.innerWidth < 768) {
+    if (!isTabletUp) {
       setMobileTab("center");
       setCenterMode("map");
     }
   };
 
   const openIntelFromMap = () => {
-    setIntelBackToMap(true);
-    setMobileTab("intel");
+    if (!isTabletUp) setMobileTab("intel");
     setMapActionsOpen(false);
   };
 
   const backToMapFromIntel = () => {
-    setIntelBackToMap(false);
     setMobileTab("center");
     setCenterMode("map");
   };
@@ -146,82 +149,57 @@ export default function Home() {
     <>
       <TopBar onSelectTickerSignal={(s) => setActiveSignal(s as Signal)} />
 
-      {/* Center Pane Shell (desktop: between sidebars; mobile: full content under Center tab) */}
+      {/* Center Pane Shell
+          mobile (<820px):  full-width, shown only when mobileTab=center
+          tablet (820–1023px): centre+right pane (2-pane), right=288px, no left sidebar
+          desktop (1024px+): 3-pane, left=288px right=288px */}
       <main
-        className="fixed z-30 bg-[var(--surface-1)]/95 backdrop-blur-md border-x border-[color:var(--border)] overflow-hidden"
+        className={`fixed z-30 bg-[var(--surface-0)] overflow-hidden left-0 lg:left-[288px] ${
+          isTabletUp ? "right-[288px]" : "right-0"
+        } ${mobileTab === "center" || isTabletUp ? "block" : "hidden"} lg:block`}
         style={{
           top: TOPBAR_H,
           bottom: "calc(var(--map-footer-stack, 28px) + var(--war-hud-reserve, 0px))",
-          left: isMdUp ? SIDEBAR_W : 0,
-          right: isMdUp ? SIDEBAR_W : 0,
-          display: isMdUp || mobileTab === "center" ? "block" : "none",
         }}
       >
         <div className="flex h-full min-h-0 flex-col">
-          {/* Keep map full-bleed: show mode switcher as a floating pill on map. */}
-          {centerMode === "map" ? (
-            <div className="pointer-events-none absolute right-2 top-2 z-[60]">
-              <div className="pointer-events-auto">
-                <CenterModeSwitcher
-                  value={centerMode}
-                  onChange={setCenterMode}
-                  showLive={showWarRoomCenter}
-                  liveLabel={
-                    operationMode === "COUNTING_DAY"
-                      ? "COUNTING LIVE"
-                      : operationMode !== "PRE-POLL"
-                        ? "VOTING LIVE"
-                        : "LIVE"
-                  }
-                />
-              </div>
-            </div>
-          ) : (
-            <div className="flex items-center justify-between gap-2 border-b border-[color:var(--border)] bg-[var(--surface-1)]/90 px-2.5 py-2">
-              <div className="flex items-center gap-2">
-                <LayoutPanelTop className="h-4 w-4 text-[var(--text-secondary)]" />
-                <span className="font-mono text-[10px] font-bold tracking-wider text-[var(--text-secondary)]">
-                  CENTER
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <CenterModeSwitcher
-                  value={centerMode}
-                  onChange={setCenterMode}
-                  showLive={showWarRoomCenter}
-                  liveLabel={
-                    operationMode === "COUNTING_DAY"
-                      ? "COUNTING LIVE"
-                      : operationMode !== "PRE-POLL"
-                        ? "VOTING LIVE"
-                        : "LIVE"
-                  }
-                />
-                {/* Hidden for now (per UX feedback). */}
-              </div>
-            </div>
-          )}
+          <div className="flex w-full min-w-0 items-center justify-center border-b border-[color:var(--border)] bg-[var(--surface-1)] px-2 py-2.5 sm:px-4">
+            <CenterModeSwitcher
+              value={centerMode}
+              onChange={setCenterMode}
+              showLive={showWarRoomCenter}
+              liveLabel={
+                operationMode === "COUNTING_DAY"
+                  ? "Counting live"
+                  : operationMode !== "PRE-POLL"
+                    ? "Voting live"
+                    : "Live"
+              }
+            />
+          </div>
 
           {centerMode === "live" ? (
-            <div className="flex items-center gap-2 border-b border-[color:var(--border)] bg-[var(--surface-1)]/80 px-2.5 py-2">
-              <div className="flex flex-1 overflow-hidden rounded-none border border-[color:var(--border)] bg-[var(--surface-2)] p-0.5 md:max-w-md">
+            <div className="flex items-center justify-center gap-2 border-b border-[color:var(--border)] bg-[var(--surface-1)] px-3 py-2">
+              <div className="eb-pills" role="tablist" aria-label="Live tabs">
                 <button
                   type="button"
+                  role="tab"
+                  aria-selected={liveTab === "TURNOUT"}
+                  data-active={liveTab === "TURNOUT"}
                   onClick={() => setLiveTab("TURNOUT")}
-                  className={`flex flex-1 items-center justify-center gap-1 px-2 py-1 font-mono text-[9px] font-bold tracking-wide transition-colors ${
-                    liveTab === "TURNOUT" ? "bg-[var(--surface-1)] text-[#0284c7] shadow-sm" : "text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-3)]"
-                  }`}
+                  className="eb-pill"
                 >
-                  <Activity className="h-3 w-3 shrink-0" /> LIVE TURNOUT
+                  <Activity className="h-3.5 w-3.5" aria-hidden /> Live turnout
                 </button>
                 <button
                   type="button"
+                  role="tab"
+                  aria-selected={liveTab === "EXIT_POLLS"}
+                  data-active={liveTab === "EXIT_POLLS"}
                   onClick={() => setLiveTab("EXIT_POLLS")}
-                  className={`flex flex-1 items-center justify-center gap-1 px-2 py-1 font-mono text-[9px] font-bold tracking-wide transition-colors ${
-                    liveTab === "EXIT_POLLS" ? "bg-[var(--surface-1)] text-[#ea580c] shadow-sm" : "text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-3)]"
-                  }`}
+                  className="eb-pill"
                 >
-                  <BarChart3 className="h-3 w-3 shrink-0" /> EXIT POLLS
+                  <BarChart3 className="h-3.5 w-3.5" aria-hidden /> Exit polls
                 </button>
               </div>
             </div>
@@ -253,7 +231,7 @@ export default function Home() {
         </div>
       </main>
 
-      <aside className={`fixed top-[36px] bottom-[48px] md:bottom-[28px] left-0 w-full md:w-[280px] z-40 bg-[var(--surface-1)]/95 backdrop-blur-md border-r border-[color:var(--border)] transition-transform duration-300 ${mobileTab === "briefing" ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}>
+      <aside className={`fixed top-[40px] bottom-[28px] max-[819px]:bottom-[56px] left-0 w-full lg:w-[288px] z-40 bg-[var(--surface-1)] border-r border-[color:var(--border)] transition-transform duration-300 ${mobileTab === "briefing" ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}>
         <SignalPane
           globalStateFilter={globalStateFilter}
           globalConstituencyId={globalConstituencyId}
@@ -263,16 +241,20 @@ export default function Home() {
             setActiveSignal(s as Signal);
             const nextMode = centerModeForSignal(s);
             setCenterMode(nextMode);
-            if (typeof window !== "undefined" && window.innerWidth < 768) setMobileTab("center");
+            if (!isTabletUp) setMobileTab("center");
           }}
           onOpenSignals={() => {
-            setMobileTab("center");
+            if (!isTabletUp) setMobileTab("center");
             setCenterMode("signals");
           }}
         />
       </aside>
 
-      <aside className={`fixed top-[36px] bottom-[48px] md:bottom-[28px] right-0 flex min-h-0 w-full flex-col overflow-hidden md:w-[280px] z-40 bg-[var(--surface-1)]/95 backdrop-blur-md border-l border-[color:var(--border)] transition-transform duration-300 ${mobileTab === "intel" ? "translate-x-0" : "translate-x-full md:translate-x-0"}`}>
+      <aside className={`fixed top-[40px] z-40 bg-[var(--surface-1)] border-l border-[color:var(--border)] transition-transform duration-300 right-0 flex min-h-0 flex-col overflow-hidden bottom-[28px] max-[819px]:bottom-[56px] ${
+        isTabletUp
+          ? "w-[288px] translate-x-0"
+          : `w-full ${mobileTab === "intel" ? "translate-x-0" : "translate-x-full"}`
+      }`}>
         <IntelPane
           globalStateFilter={globalStateFilter}
           setGlobalStateFilter={handleStateFilter}
@@ -397,16 +379,45 @@ export default function Home() {
         </div>
       )}
 
-      <div className="md:hidden fixed bottom-0 left-0 right-0 h-[48px] bg-[var(--surface-1)] border-t border-[color:var(--border)] z-50 flex shadow-lg">
-        <button onClick={() => setMobileTab("briefing")} className={`flex-1 flex flex-col items-center justify-center gap-1 font-mono text-[10px] ${mobileTab === "briefing" ? "text-[#16a34a] bg-[#16a34a]/10 border-t-2 border-[#16a34a]" : "text-[var(--text-muted)]"}`}><Sparkles className="h-4 w-4" /> AI BRIEFING</button>
+      <nav
+        className={`fixed bottom-0 left-0 right-0 bg-[var(--surface-1)] border-t border-[color:var(--border)] z-50 pb-safe ${isTabletUp ? "hidden" : "flex"} lg:hidden`}
+        style={{ minHeight: 56 }}
+        aria-label="Primary"
+      >
         <button
-          onClick={() => { setMobileTab('center'); }}
-          className={`flex-1 flex flex-col items-center justify-center gap-1 font-mono text-[10px] ${mobileTab === 'center' ? 'text-[#16a34a] bg-[#16a34a]/10 border-t-2 border-[#16a34a]' : 'text-[var(--text-muted)]'}`}
+          type="button"
+          onClick={() => setMobileTab("briefing")}
+          aria-label="Feed"
+          aria-pressed={mobileTab === "briefing"}
+          className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium hit-44 transition-colors ${mobileTab === "briefing" ? "text-[var(--brand)]" : "text-[var(--text-muted)]"}`}
         >
-          <LayoutPanelTop className="h-4 w-4" /> CENTER
+          <Sparkles className="h-5 w-5" aria-hidden="true" />
+          Feed
+          <span className={`mt-0.5 h-0.5 w-6 rounded-full ${mobileTab === "briefing" ? "bg-[var(--brand)]" : "bg-transparent"}`} />
         </button>
-        <button onClick={() => { setIntelBackToMap(false); setMobileTab('intel'); }} className={`flex-1 flex flex-col items-center justify-center gap-1 font-mono text-[10px] ${mobileTab === 'intel' ? 'text-[#ea580c] bg-[#ea580c]/10 border-t-2 border-[#ea580c]' : 'text-[var(--text-muted)]'}`}><Database className="h-4 w-4" /> INTEL</button>
-      </div>
+        <button
+          type="button"
+          onClick={() => setMobileTab("center")}
+          aria-label="Dashboard"
+          aria-pressed={mobileTab === "center"}
+          className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium hit-44 transition-colors ${mobileTab === "center" ? "text-[var(--brand)]" : "text-[var(--text-muted)]"}`}
+        >
+          <LayoutPanelTop className="h-5 w-5" aria-hidden="true" />
+          Dashboard
+          <span className={`mt-0.5 h-0.5 w-6 rounded-full ${mobileTab === "center" ? "bg-[var(--brand)]" : "bg-transparent"}`} />
+        </button>
+        <button
+          type="button"
+          onClick={() => { setMobileTab("intel"); }}
+          aria-label="Seats"
+          aria-pressed={mobileTab === "intel"}
+          className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium hit-44 transition-colors ${mobileTab === "intel" ? "text-[var(--brand)]" : "text-[var(--text-muted)]"}`}
+        >
+          <Database className="h-5 w-5" aria-hidden="true" />
+          Seats
+          <span className={`mt-0.5 h-0.5 w-6 rounded-full ${mobileTab === "intel" ? "bg-[var(--brand)]" : "bg-transparent"}`} />
+        </button>
+      </nav>
 
       <BottomBar />
       {activeClusterSignals && activeClusterSignals.length > 0 && (
@@ -423,38 +434,20 @@ export default function Home() {
 
       {moreOpen ? (
         <div className="fixed inset-0 z-[90] flex items-end md:items-center justify-center bg-black/40 p-2" role="dialog" aria-modal="true">
-          <div className="w-full max-w-[520px] rounded-xl border border-[color:var(--border)] bg-[var(--surface-1)] shadow-2xl">
+          <div className="w-full max-w-[520px] rounded-[var(--radius-lg)] border border-[color:var(--border)] bg-[var(--surface-1)] shadow-[var(--shadow-modal)]">
             <div className="flex items-center justify-between border-b border-[color:var(--border)] px-4 py-3">
-              <div className="font-mono text-[11px] font-bold tracking-wider text-[var(--text-secondary)]">MORE</div>
-              <button
-                type="button"
-                onClick={() => setMoreOpen(false)}
-                className="rounded-md border border-[color:var(--border)] bg-[var(--surface-1)] px-2 py-1 font-mono text-[10px] font-bold text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
-              >
-                CLOSE
-              </button>
+              <h2 className="text-[14px] font-semibold text-[var(--text-primary)]">More</h2>
+              <button type="button" onClick={() => setMoreOpen(false)} className="eb-btn-ghost">Close</button>
             </div>
             <div className="px-4 py-3">
-              <div className="grid gap-2">
-                <button
-                  type="button"
-                  className="w-full rounded-lg border border-[color:var(--border)] bg-[var(--surface-1)] px-3 py-2 text-left hover:bg-[var(--surface-2)]"
-                  onClick={() => {
-                    setCenterMode("signals");
-                    setMobileTab("center");
-                    setMoreOpen(false);
-                  }}
-                >
-                  <div className="font-mono text-[10px] font-bold text-[#16a34a] tracking-wider">OPEN INTELLIGENCE FEED</div>
-                  <div className="text-[12px] text-[var(--text-secondary)]">Center → Signals tab: full OSINT list with state filters.</div>
-                </button>
-                <div className="rounded-lg border border-[color:var(--border)] bg-[var(--surface-2)] px-3 py-2">
-                  <div className="font-mono text-[10px] font-bold text-[var(--text-secondary)] tracking-wider">PHASE 1</div>
-                  <div className="mt-1 text-[12px] text-[var(--text-secondary)] leading-relaxed">
-                    Shell + navigation first. Next: true corroboration logic, handle allowlists, and archive-backed timelines.
-                  </div>
-                </div>
-              </div>
+              <button
+                type="button"
+                className="w-full rounded-[var(--radius)] border border-[color:var(--border)] bg-[var(--surface-1)] px-3 py-2.5 text-left hover:bg-[var(--surface-2)] transition-colors"
+                onClick={() => { setCenterMode("signals"); if (!isTabletUp) setMobileTab("center"); setMoreOpen(false); }}
+              >
+                <div className="text-[13px] font-semibold text-[var(--text-primary)]">Open news feed</div>
+                <div className="mt-0.5 text-[12px] text-[var(--text-muted)]">Every story, filterable by state.</div>
+              </button>
             </div>
           </div>
         </div>

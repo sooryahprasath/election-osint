@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, CheckCircle, IndianRupee, User } from "lucide-react";
+import { AlertTriangle, CheckCircle, ChevronRight, User } from "lucide-react";
 import { formatIndianCurrency, normalizeEducation } from "@/lib/utils/formatting";
 
 // Fallback logic to get colors without the old static mock dictionary
@@ -28,9 +28,9 @@ export default function CandidateRow({ candidate, onClick, isLeading }: Candidat
   return (
     <div 
       onClick={onClick}
-      className={`px-3 py-2.5 border-b border-[color:var(--border)] transition-colors ${onClick ? 'cursor-pointer hover:bg-[var(--surface-2)]' : 'hover:bg-[var(--surface-2)]'}`}
+      className={`group px-3 py-2.5 border-b border-[color:var(--border)] transition-colors ${onClick ? 'cursor-pointer hover:bg-[var(--surface-2)]' : ''}`}
     >
-      <div className="flex items-start gap-2.5">
+      <div className="flex items-center gap-2.5">
         <div className="relative mt-0.5 h-8 w-8 shrink-0 overflow-hidden rounded-md border border-[color:var(--border)] bg-[var(--surface-2)]">
           {photoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -65,7 +65,7 @@ export default function CandidateRow({ candidate, onClick, isLeading }: Candidat
 
                 {crim > 0 ? (
                   <span className="inline-flex items-center gap-1 rounded border border-[#dc2626]/25 bg-[#dc2626]/10 px-1.5 py-0.5 font-mono text-[9px] font-bold text-[#b91c1c]">
-                    <AlertTriangle className="h-3 w-3" /> CRIM: {crim}
+                    <AlertTriangle className="h-3 w-3" /> {crim} case{crim !== 1 ? "s" : ""}
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1 rounded border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[9px] font-bold text-[#16a34a]">
@@ -74,7 +74,7 @@ export default function CandidateRow({ candidate, onClick, isLeading }: Candidat
                 )}
 
                 <span className="inline-flex items-center gap-1 rounded border border-[#ea580c]/25 bg-[#ea580c]/10 px-1.5 py-0.5 font-mono text-[9px] font-bold text-[#c2410c]">
-                  <IndianRupee className="h-3 w-3" /> {formatIndianCurrency(assets)}
+                  {formatIndianCurrency(assets)}
                 </span>
 
                 {Boolean(c.removed) && (
@@ -102,6 +102,7 @@ export default function CandidateRow({ candidate, onClick, isLeading }: Candidat
           </div>
         </div>
       </div>
+      {onClick && <ChevronRight className="h-4 w-4 shrink-0 text-[var(--text-muted)] opacity-50 group-hover:opacity-100 ml-1" />}
     </div>
   );
 }

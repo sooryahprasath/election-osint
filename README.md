@@ -16,7 +16,7 @@
 
 <br />
 
-[Architecture](#architecture) · [Data pipelines](#data-pipelines) · [Features](#features) · [Install](#installation) · [Configuration](#configuration) · [Workers](#python-workers-osint_workers) · [Voting day runbook](#voting-day-runbook) · [API](#http-ingest-api) · [Security](#security-model)
+[Architecture](#architecture) · [Data pipelines](#data-pipelines) · [Features](#features) · [Install](#installation) · [Configuration](#configuration) · [Workers](#python-workers-osint_workers) · [Voting day runbook](#voting-day-runbook) · [API](#http-ingest-api) · [Security](#security-model) · [Repo layout](#repository-layout)
 
 </div>
 
@@ -366,6 +366,13 @@ curl -X POST https://your-app.vercel.app/api/ingest \
 
 ---
 
+## What is (and is not) in git
+
+- **ECI / MyNeta source files** — `osint_workers/historical_data/` holds XLSX, CSV, and PDF inputs for ingestors. Those binaries are **gitignored** (see `.gitignore`); copy downloads from ECI into that folder locally. Only `.gitkeep` ships with the repo.
+- **UI screenshots** — PNG captures are **gitignored**; regenerate with `node scripts/capture-ui.mjs` or the audit scripts under `scripts/` when you need visuals for a PR.
+
+---
+
 ## Repository layout
 
 ```text
@@ -414,7 +421,10 @@ election-osint/
 │   └── historical_data/               # XLSX / CSV source files (not committed by default)
 ├── scripts/
 │   ├── capture-ui.mjs                  # Playwright UI screenshot utility
+│   ├── ux-audit.mjs                    # Wide-viewport capture helper
+│   ├── mobile-audit.mjs                # Phone capture helper
 │   └── check-supabase-env.mjs          # Env var validation helper
+├── ui-audit/                           # Mobile audit report (markdown)
 ├── __tests__/
 │   └── formatting.test.ts
 └── package.json

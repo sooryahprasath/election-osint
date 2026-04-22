@@ -4,16 +4,13 @@ import { Map as MapIcon, Video, Radar, Radio, BarChart3, Sparkles } from "lucide
 
 export type CenterMode = "signals" | "videos" | "map" | "live" | "polls" | "insights";
 
-const MODE_META: Record<
-  CenterMode,
-  { label: string; Icon: React.ComponentType<{ className?: string }> ; accent: string; bg: string; border: string }
-> = {
-  signals: { label: "SIGNALS", Icon: Radio, accent: "#16a34a", bg: "bg-emerald-500/10", border: "border-emerald-500/25" },
-  videos: { label: "VIDEOS", Icon: Video, accent: "#0284c7", bg: "bg-sky-500/10", border: "border-sky-500/25" },
-  map: { label: "MAP", Icon: MapIcon, accent: "#0284c7", bg: "bg-sky-500/10", border: "border-sky-500/25" },
-  live: { label: "LIVE", Icon: Radar, accent: "#dc2626", bg: "bg-red-500/10", border: "border-red-500/25" },
-  polls: { label: "POLLS", Icon: BarChart3, accent: "#8b5cf6", bg: "bg-violet-500/10", border: "border-violet-500/25" },
-  insights: { label: "INSIGHTS", Icon: Sparkles, accent: "#0ea5e9", bg: "bg-sky-500/10", border: "border-sky-500/25" },
+const MODE_META: Record<CenterMode, { label: string; Icon: React.ComponentType<{ className?: string }> }> = {
+  signals:  { label: "News",     Icon: Radio },
+  videos:   { label: "Videos",   Icon: Video },
+  map:      { label: "Map",      Icon: MapIcon },
+  live:     { label: "Live",     Icon: Radar },
+  polls:    { label: "Polls",    Icon: BarChart3 },
+  insights: { label: "Insights", Icon: Sparkles },
 };
 
 export function CenterModeSwitcher({
@@ -28,35 +25,37 @@ export function CenterModeSwitcher({
   liveLabel?: string;
 }) {
   const modes: CenterMode[] = showLive
-    ? ["live", "signals", "insights", "videos", "map", "polls"]
-    : ["signals", "insights", "videos", "map", "polls"];
+    ? ["insights", "signals", "videos", "map", "polls", "live"]
+    : ["insights", "signals", "videos", "map", "polls"];
+
   return (
-    <div className="flex items-center gap-1 rounded-lg border border-[color:var(--border)] bg-[var(--surface-1)]/85 p-1 shadow-sm backdrop-blur-sm">
-      {modes.map((mode) => {
-        const meta = MODE_META[mode];
-        const active = value === mode;
-        const Icon = meta.Icon;
-        const label = mode === "live" && liveLabel ? liveLabel : meta.label;
-        return (
-          <button
-            key={mode}
-            type="button"
-            onClick={() => onChange(mode)}
-            className={[
-              "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 font-mono text-[10px] font-bold tracking-wider transition-colors",
-              active
-                ? `${meta.bg} ${meta.border} border`
-                : "border border-transparent text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)]",
-            ].join(" ")}
-            style={active ? { color: meta.accent } : undefined}
-            aria-pressed={active}
-          >
-            <Icon className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">{label}</span>
-          </button>
-        );
-      })}
+    <div className="flex w-full min-w-0 justify-center overflow-x-auto no-scrollbar py-0.5">
+      <div
+        className="eb-pills mx-auto w-max max-w-full snap-x snap-mandatory"
+        role="tablist"
+        aria-label="Views"
+      >
+        {modes.map((mode) => {
+          const meta = MODE_META[mode];
+          const active = value === mode;
+          const Icon = meta.Icon;
+          const label = mode === "live" && liveLabel ? liveLabel : meta.label;
+          return (
+            <button
+              key={mode}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              data-active={active}
+              onClick={() => onChange(mode)}
+              className="eb-pill snap-start shrink-0"
+            >
+              <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>{label}</span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
-

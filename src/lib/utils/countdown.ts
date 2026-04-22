@@ -29,10 +29,10 @@ export interface CountdownResult {
 
 export function getNextElectionEvent(now: Date = new Date()): CountdownResult {
   const events = [
-    { date: ELECTION_DATES.phase1, label: "PHASE 1 POLLING", phase: "Phase 1" },
-    { date: ELECTION_DATES.phase2, label: "PHASE 2 POLLING", phase: "Phase 2" },
-    { date: ELECTION_DATES.phase2b, label: "WB PHASE 2B", phase: "Phase 2B" },
-    { date: ELECTION_DATES.counting, label: "COUNTING DAY", phase: "Counting" },
+    { date: ELECTION_DATES.phase1, label: "Phase 1 polling", phase: "Phase 1" },
+    { date: ELECTION_DATES.phase2, label: "Phase 2 polling", phase: "Phase 2" },
+    { date: ELECTION_DATES.phase2b, label: "WB phase 2B", phase: "Phase 2B" },
+    { date: ELECTION_DATES.counting, label: "Counting day", phase: "Counting" },
   ];
 
   for (const event of events) {
@@ -54,7 +54,7 @@ export function getNextElectionEvent(now: Date = new Date()): CountdownResult {
   // All events passed
   return {
     days: 0, hours: 0, minutes: 0, seconds: 0,
-    label: "ALL PHASES COMPLETE",
+    label: "All phases complete",
     phase: "Complete",
     isPast: true,
     totalMs: 0,

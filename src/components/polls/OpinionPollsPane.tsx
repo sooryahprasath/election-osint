@@ -173,11 +173,13 @@ export function OpinionPollsPane() {
         {filtered.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 py-16 text-center">
             <BarChart3 className="h-8 w-8 text-[var(--text-muted)] opacity-40" />
-            <p className="font-mono text-[11px] text-[var(--text-muted)]">
-              No opinion polls ingested yet.
+            <p className="font-sans text-[13px] font-semibold text-[var(--text-secondary)] md:font-mono md:text-[11px] md:font-normal md:text-[var(--text-muted)]">
+              No opinion polls to show yet.
             </p>
-            <p className="font-mono text-[9px] text-[var(--text-muted)] opacity-70 max-w-48">
-              Run poll_ingestor.py to start collecting survey data from news sources.
+            <p className="font-sans text-[12px] text-[var(--text-muted)] max-w-xs md:font-mono md:text-[9px] md:max-w-48">
+              {process.env.NEXT_PUBLIC_SHOW_DEV_HINTS === "true"
+                ? "Run poll_ingestor.py to start collecting survey data from news sources."
+                : "We publish opinion polls as soon as they’re verified. Check back a little later."}
             </p>
           </div>
         ) : (

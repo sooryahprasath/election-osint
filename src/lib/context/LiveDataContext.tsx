@@ -143,24 +143,30 @@ export const LiveDataProvider = ({ children }: { children: React.ReactNode }) =>
     [CANDIDATE_COLS]
   )
 
+  const CANDIDATE_PREFIX_STAGGER_MS = 120
+
   const ensureCandidatesForPrefixes = useCallback(
     async (prefixes: string[]) => {
       const wanted = (prefixes || []).map((p) => String(p || "").trim()).filter(Boolean)
       const toLoad = wanted.filter((p) => !loadedCandidatePrefixesRef.current.has(p))
       if (toLoad.length === 0) return
 
-      for (const pfx of toLoad) loadedCandidatePrefixesRef.current.add(pfx)
-
-      const chunks = await Promise.all(toLoad.map((pfx) => fetchCandidatesForPrefix(pfx)))
-      const incoming = chunks.flat()
-      if (incoming.length === 0) return
-
-      setCandidates((prev) => {
-        const byId = new Map<string, any>()
-        for (const c of prev) byId.set(String(c.id), c)
-        for (const c of incoming) byId.set(String(c.id), c)
-        return Array.from(byId.values())
-      })
+      for (let i = 0; i < toLoad.length; i++) {
+        const pfx = toLoad[i]
+        loadedCandidatePrefixesRef.current.add(pfx)
+        const chunk = await fetchCandidatesForPrefix(pfx)
+        if (chunk.length) {
+          setCandidates((prev) => {
+            const byId = new Map<string, any>()
+            for (const c of prev) byId.set(String(c.id), c)
+            for (const c of chunk) byId.set(String(c.id), c)
+            return Array.from(byId.values())
+          })
+        }
+        if (i < toLoad.length - 1) {
+          await new Promise<void>((r) => setTimeout(r, CANDIDATE_PREFIX_STAGGER_MS))
+        }
+      }
     },
     [fetchCandidatesForPrefix]
   )
