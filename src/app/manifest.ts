@@ -2,18 +2,18 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "DHARMA-OSINT — 2026 Election Intelligence",
-    short_name: "D-OSINT",
+    name: "Election Watch India 2026",
+    short_name: "Election Watch",
     description:
-      "Situational awareness for 2026 Indian state elections — Kerala, Assam, Tamil Nadu, West Bengal, Puducherry.",
+      "Election Watch for India’s 2026 state assembly elections: live signals, candidate intel, maps, and 2021 seat results.",
     start_url: "/",
     display: "standalone",
-    background_color: "#f4f4f5",
+    background_color: "#0b0f14",
     theme_color: "#16a34a",
     orientation: "any",
     icons: [
       {
-        src: "/globe.svg",
+        src: "/icon.svg",
         sizes: "any",
         type: "image/svg+xml",
         purpose: "any",
