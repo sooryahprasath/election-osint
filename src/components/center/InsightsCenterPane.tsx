@@ -289,7 +289,11 @@ function SeatShareArc({
         <div className="font-mono text-[11px] text-[var(--text-muted)]">{total} seats total</div>
       </div>
       <div className="mt-2 flex items-center justify-center overflow-visible">
-        <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMidYMid meet" className="h-auto w-full max-w-[360px]">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          preserveAspectRatio="xMidYMid meet"
+          className="pointer-events-none h-auto w-full max-w-[360px]"
+        >
           {dotEls}
           {/* Largest winner */}
           {counts[0] && (
@@ -604,9 +608,16 @@ export default function InsightsCenterPane({
   const [stateElectorsSummary, setStateElectorsSummary] = useState<any[] | null>(null)
   const [seatElectorsSummary, setSeatElectorsSummary] = useState<any | null>(null)
   const [assetsDb, setAssetsDb] = useState<{ median: number | null; coveragePct: number | null; assetsRows: number; totalRows: number } | null>(null)
-  const [topAssetsByState, setTopAssetsByState] = useState<Array<{ state: string; name: string; party: string; assets_value: number }> | null>(null)
+  const [topAssetsByState, setTopAssetsByState] = useState<Array<{ state: string; id: string; name: string; party: string; assets_value: number; constituency_id: string }> | null>(null)
   const [stateTopAssets, setStateTopAssets] = useState<Array<{ id: string; name: string; party: string; assets_value: number; constituency_id: string }> | null>(null)
   const [seatTopAsset, setSeatTopAsset] = useState<{ id: string; name: string; party: string; assets_value: number } | null>(null)
+
+  const openCandidateDossier = (candidateId: string) => {
+    if (typeof window === "undefined") return
+    const id = String(candidateId || "")
+    if (!id) return
+    window.dispatchEvent(new CustomEvent("openCandidateDossier", { detail: { candidateId: id } }))
+  }
 
   useEffect(() => {
     if (!globalStateFilter) return
@@ -742,7 +753,7 @@ export default function InsightsCenterPane({
           const baseQuery = () =>
             supabase
               .from("candidates")
-              .select("name,party,assets_value,constituency_id")
+              .select("id,name,party,assets_value,constituency_id")
               .like("constituency_id", `${prefix}-%`)
               .gt("assets_value", 0)
               .order("assets_value", { ascending: false })
@@ -753,10 +764,17 @@ export default function InsightsCenterPane({
           const data = (first?.error ? second?.data : first?.data) as any[] | null
           const r: any = Array.isArray(data) && data.length ? data[0] : null
           if (!r?.assets_value) return null
-          return { state: s, name: String(r.name || "—"), party: String(r.party || "—"), assets_value: Number(r.assets_value || 0) }
+          return {
+            state: s,
+            id: String(r.id || ""),
+            name: String(r.name || "—"),
+            party: String(r.party || "—"),
+            assets_value: Number(r.assets_value || 0),
+            constituency_id: String(r.constituency_id || ""),
+          }
         })
       )
-      const out = rows.filter(Boolean) as Array<{ state: string; name: string; party: string; assets_value: number }>
+      const out = rows.filter(Boolean) as Array<{ state: string; id: string; name: string; party: string; assets_value: number; constituency_id: string }>
       out.sort((a, b) => b.assets_value - a.assets_value)
       if (!cancelled) setTopAssetsByState(out)
     }
@@ -1558,11 +1576,17 @@ export default function InsightsCenterPane({
                 <div className="mt-2 overflow-hidden rounded border border-[var(--border)]">
                   <div className="max-h-[220px] overflow-auto">
                     {(topAssetsByState || []).slice(0, 10).map((r) => (
-                      <div key={`${r.state}-${r.name}`} className="grid grid-cols-12 gap-0 border-t border-[var(--border)] px-2 py-1.5">
+                      <div key={`${r.state}-${r.id || r.name}`} className="grid grid-cols-12 gap-0 border-t border-[var(--border)] px-2 py-1.5">
                         <div className="col-span-3 font-mono text-[9px] font-bold text-[var(--text-secondary)]">{STATE_META[r.state]?.abbr || r.state}</div>
-                        <div className="col-span-6 min-w-0 font-mono text-[9px] text-[var(--text-muted)] truncate">
-                          {r.name}{r.party ? ` · ${r.party}` : ""}
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => openCandidateDossier(String(r.id))}
+                          className="col-span-6 min-w-0 truncate text-left font-mono text-[9px] text-[#0ea5e9] hover:text-[#0ea5e9]/80"
+                          aria-label={`Open dossier for ${r.name}`}
+                        >
+                          {r.name}
+                          {r.party ? <span className="text-[var(--text-muted)]">{` · ${r.party}`}</span> : null}
+                        </button>
                         <div className="col-span-3 text-right font-mono text-[9px] font-bold text-[var(--text-secondary)]">
                           ₹{(Number(r.assets_value) / 1e7).toFixed(Number(r.assets_value) < 1e8 ? 1 : 0)}Cr
                         </div>
@@ -1596,7 +1620,10 @@ export default function InsightsCenterPane({
                       <button
                         key={`${r.state}-${r.id}`}
                         type="button"
-                        onClick={() => onSelectConstituency(String(r.id))}
+                        onClick={() => {
+                          onChangeGlobalStateFilter(String(r.state))
+                          onSelectConstituency(String(r.id))
+                        }}
                         className="flex w-full items-center justify-between gap-2 border-t border-[var(--border)] px-2 py-1.5 text-left hover:bg-[var(--surface-2)]"
                       >
                         <div className="min-w-0">
@@ -2162,7 +2189,14 @@ export default function InsightsCenterPane({
                     <div key={r.id} className="grid grid-cols-12 gap-0 border-t border-[var(--border)] px-2 py-1.5">
                       <div className="col-span-1 font-mono text-[9px] text-[var(--text-muted)]">{idx + 1}</div>
                       <div className="col-span-7 min-w-0">
-                        <div className="truncate font-mono text-[10px] font-bold text-[var(--text-secondary)]">{r.name}</div>
+                        <button
+                          type="button"
+                          onClick={() => openCandidateDossier(String(r.id))}
+                          className="w-full truncate text-left font-mono text-[10px] font-bold text-[#0ea5e9] hover:text-[#0ea5e9]/80"
+                          aria-label={`Open dossier for ${r.name}`}
+                        >
+                          {r.name}
+                        </button>
                         <div className="mt-0.5 truncate font-mono text-[8px] text-[var(--text-muted)]">
                           {r.party ? `${r.party} · ` : ""}{r.constituency_id}
                         </div>
