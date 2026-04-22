@@ -213,7 +213,12 @@ export default function AppShell() {
           isTabletUp ? "flex" : "hidden"
         } flex-col`}
       >
-        <IntelPane globalStateFilter={globalStateFilter} setGlobalStateFilter={handleStateFilter} globalConstituencyId={globalConstituencyId} />
+        <IntelPane
+          globalStateFilter={globalStateFilter}
+          setGlobalStateFilter={handleStateFilter}
+          globalConstituencyId={globalConstituencyId}
+          setGlobalConstituencyId={setGlobalConstituencyId}
+        />
       </aside>
 
       {!isTabletUp ? (
@@ -222,7 +227,8 @@ export default function AppShell() {
             globalStateFilter={globalStateFilter}
             setGlobalStateFilter={handleStateFilter}
             globalConstituencyId={globalConstituencyId}
-            onBack={backToMapFromIntel}
+            setGlobalConstituencyId={setGlobalConstituencyId}
+            onBackToMap={backToMapFromIntel}
           />
         </div>
       ) : null}
