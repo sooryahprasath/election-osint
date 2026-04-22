@@ -259,9 +259,11 @@ function SeatShareArc({
   let cursor = 0
   const dotEls: any[] = []
   const width = 300
-  const height = 182
+  // Add extra bottom padding so the center label never overlaps dots.
+  const height = 196
   const cx = width / 2
-  const baseY = 154
+  // Lift the arc a bit to reserve space for overlay text.
+  const baseY = 142
   for (let r = 0; r < rows; r++) {
     const n = scaledCaps[r]
     // Tighter spacing for prettier arcs; small totals still need slightly larger steps.
@@ -292,12 +294,38 @@ function SeatShareArc({
           {/* Largest winner */}
           {counts[0] && (
             <>
-              <text x={cx} y={height - 26} textAnchor="middle" fill="var(--text-secondary)" fontSize="18" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace" fontWeight="800">
-                {counts[0].count}/{total}
-              </text>
-              <text x={cx} y={height - 10} textAnchor="middle" fill="var(--text-muted)" fontSize="10" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace">
-                {counts[0].key} · {Math.round((counts[0].count/total)*100)}%
-              </text>
+              <g>
+                <rect
+                  x={cx - 62}
+                  y={height - 40}
+                  width={124}
+                  height={30}
+                  rx={999}
+                  fill="var(--surface-1)"
+                  opacity={0.92}
+                />
+                <text
+                  x={cx}
+                  y={height - 20}
+                  textAnchor="middle"
+                  fill="var(--text-secondary)"
+                  fontSize="16"
+                  fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+                  fontWeight="800"
+                >
+                  {counts[0].count}/{total}
+                </text>
+                <text
+                  x={cx}
+                  y={height - 8}
+                  textAnchor="middle"
+                  fill="var(--text-muted)"
+                  fontSize="9"
+                  fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+                >
+                  {counts[0].key} · {Math.round((counts[0].count / total) * 100)}%
+                </text>
+              </g>
             </>
           )}
         </svg>

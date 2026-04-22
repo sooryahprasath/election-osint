@@ -1,457 +1,52 @@
-"use client";
-
-import { useState, useEffect, useRef } from "react";
-import { Sparkles, Database, LayoutPanelTop, Activity, BarChart3, ChevronDown, Layers, Globe2, MapPinned, Clapperboard } from "lucide-react";
-import TopBar from "@/components/TopBar";
-import BottomBar from "@/components/BottomBar";
-import SignalPane from "@/components/signals/SignalPane";
-import IntelPane from "@/components/intel/IntelPane";
-import SignalModal from "@/components/signals/SignalModal";
-import SignalClusterModal from "@/components/signals/SignalClusterModal";
-import { useLiveData } from "@/lib/context/LiveDataContext";
-import CenterPane from "@/components/center/CenterPane";
-import { CenterModeSwitcher, type CenterMode } from "@/components/center/CenterModeSwitcher";
-import { centerModeForSignal } from "@/lib/utils/signalClassifier";
-import {
-  getDefaultCenterModeOnInitialLoad,
-  shouldShowWarRoomCenterTab,
-} from "@/lib/utils/centerDefaultMode";
-
-const TOPBAR_H = 40;
-const SIDEBAR_W = 288;
+import Link from "next/link"
+import AppShell from "@/app/ui/AppShell"
+import { getSiteUrl } from "@/lib/site"
 
 export default function Home() {
-  type Signal = Record<string, unknown>;
-  const { operationMode, simulatedDate } = useLiveData();
-  const [flyToState, setFlyToState] = useState<string | null>(null);
-  const [globalStateFilter, setGlobalStateFilter] = useState<string>("ALL");
-  const [globalConstituencyId, setGlobalConstituencyId] = useState<string | null>(null);
-  const [activeSignal, setActiveSignal] = useState<Signal | null>(null);
-  const [activeClusterSignals, setActiveClusterSignals] = useState<Signal[] | null>(null);
-  const [mobileTab, setMobileTab] = useState<"briefing" | "center" | "intel">("center");
-  const [centerMode, setCenterMode] = useState<CenterMode>("insights");
-  const [moreOpen, setMoreOpen] = useState(false);
-  const [liveTab, setLiveTab] = useState<"TURNOUT" | "EXIT_POLLS">("TURNOUT");
-  const [mapActionsOpen, setMapActionsOpen] = useState(false);
-  const mapActionsRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!mapActionsOpen) return;
-    const onDown = (e: MouseEvent) => {
-      const el = mapActionsRef.current;
-      if (el && !el.contains(e.target as Node)) setMapActionsOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [mapActionsOpen]);
-
-  // Map overlay toggles (clarifies what the tiles represent)
-  const [mapOverlayMode, setMapOverlayMode] = useState<"VIDEOS" | "ALL">("VIDEOS");
-  const [mapVerifiedOnly, setMapVerifiedOnly] = useState(false);
-
-  // FIX: Added state to track map zoom level for the reset button
-  const [mapZoom, setMapZoom] = useState(1);
-  const [resetTrigger, setResetTrigger] = useState(0);
-  /** Bump to snap map camera back to default for current state (without going national). */
-  const [stateViewSnapTrigger, setStateViewSnapTrigger] = useState(0);
-
-  /** 3-pane at lg (1024px+); 2-pane at tablet (820–1023px): centre + Intel only */
-  const [isMdUp, setIsMdUp] = useState(false);     // 1024px+ → 3-pane
-  const [isTabletUp, setIsTabletUp] = useState(false); // 820px+ → 2-pane (centre + Intel)
-  useEffect(() => {
-    const lgMq = window.matchMedia("(min-width: 1024px)");
-    const tabMq = window.matchMedia("(min-width: 820px)");
-    const applyLg  = () => setIsMdUp(lgMq.matches);
-    const applyTab = () => setIsTabletUp(tabMq.matches);
-    applyLg(); applyTab();
-    lgMq.addEventListener("change", applyLg);
-    tabMq.addEventListener("change", applyTab);
-    return () => {
-      lgMq.removeEventListener("change", applyLg);
-      tabMq.removeEventListener("change", applyTab);
-    };
-  }, []);
-
-  /** One-shot per mount: center default from calendar (Signals vs Live); refresh repeats. */
-  const centerDefaultAppliedRef = useRef(false);
-  useEffect(() => {
-    if (centerDefaultAppliedRef.current) return;
-    centerDefaultAppliedRef.current = true;
-    const now = simulatedDate ?? new Date();
-    // Requirement: Insights should be the default view on initial load.
-    setCenterMode("insights");
-    setMobileTab("center");
-  }, [simulatedDate, operationMode]);
-
-  const effectiveWallNow = simulatedDate ?? new Date();
-  const showWarRoomCenter = shouldShowWarRoomCenterTab(effectiveWallNow) && operationMode !== "PRE-POLL";
-
-  useEffect(() => {
-    if (!showWarRoomCenter && centerMode === "live") setCenterMode("insights");
-  }, [showWarRoomCenter, centerMode]);
-
-  const showMapResetButton = centerMode === "map" && (isMdUp || mobileTab === "center");
-
-  const handleStateFilter = (s: string) => {
-    setGlobalStateFilter(s);
-    setGlobalConstituencyId(null);
-    setFlyToState(s === "ALL" ? "India" : s);
-  };
-
-  const handleResetZoom = () => {
-    setGlobalStateFilter("ALL");
-    setGlobalConstituencyId(null);
-    setFlyToState("India");
-    setResetTrigger(prev => prev + 1); // Triggers the map to completely reset viewport
-    if (!isTabletUp) {
-      setMobileTab("center");
-      setCenterMode("map");
-    }
-  };
-
-  const openIntelFromMap = () => {
-    if (!isTabletUp) setMobileTab("intel");
-    setMapActionsOpen(false);
-  };
-
-  const backToMapFromIntel = () => {
-    setMobileTab("center");
-    setCenterMode("map");
-  };
-
-  /** True when map is already at “state default” (no AC selected, zoom not pinched past baseline). */
-  const atStateDefaultView =
-    globalStateFilter !== "ALL" && !globalConstituencyId && mapZoom <= 1.12;
-
-  const handleMapChromeResetClick = () => {
-    if (globalStateFilter === "ALL") {
-      handleResetZoom();
-      return;
-    }
-    if (!atStateDefaultView) {
-      setGlobalConstituencyId(null);
-      setStateViewSnapTrigger((n) => n + 1);
-      return;
-    }
-    handleResetZoom();
-  };
-
-  const mobilePaneForMapChrome: "signals" | "map" | "intel" | "warroom" =
-    mobileTab === "briefing"
-      ? "signals"
-      : mobileTab === "intel"
-        ? "intel"
-        : centerMode === "map"
-          ? "map"
-          : "signals";
+  const siteUrl = getSiteUrl()
 
   return (
     <>
-      <TopBar onSelectTickerSignal={(s) => setActiveSignal(s as Signal)} />
+      <section className="sr-only">
+        <h1>DHARMA-OSINT Election Watch — India state elections 2026</h1>
+        <p>
+          Live election intelligence dashboard for Indian state assembly elections 2026: maps, candidate dossiers, OSINT signals, and
+          2021 historical results for Tamil Nadu, Kerala, West Bengal, Assam, and Puducherry.
+        </p>
+        <p>
+          Keywords: India election watch, state election results 2021, constituency insights, candidate assets, criminal cases, election
+          news signals.
+        </p>
+        <nav aria-label="Site">
+          <ul>
+            <li>
+              <Link href="/about">About</Link>
+            </li>
+            <li>
+              <Link href="/methodology">Methodology</Link>
+            </li>
+          </ul>
+        </nav>
+      </section>
 
-      {/* Center Pane Shell
-          mobile (<820px):  full-width, shown only when mobileTab=center
-          tablet (820–1023px): centre+right pane (2-pane), right=288px, no left sidebar
-          desktop (1024px+): 3-pane, left=288px right=288px */}
-      <main
-        className={`fixed z-30 bg-[var(--surface-0)] overflow-hidden left-0 lg:left-[288px] ${
-          isTabletUp ? "right-[288px]" : "right-0"
-        } ${mobileTab === "center" || isTabletUp ? "block" : "hidden"} lg:block`}
-        style={{
-          top: TOPBAR_H,
-          bottom: "calc(var(--map-footer-stack, 28px) + var(--war-hud-reserve, 0px))",
+      <script
+        type="application/ld+json"
+        // eslint-disable-next-line react/no-danger
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "WebSite",
+            name: "DHARMA-OSINT",
+            url: siteUrl,
+            description:
+              "Election intelligence dashboard for Indian state assembly elections 2026: maps, candidate dossiers, OSINT signals, and historical 2021 results.",
+            inLanguage: "en-IN",
+          }),
         }}
-      >
-        <div className="flex h-full min-h-0 flex-col">
-          <div className="flex w-full min-w-0 items-center justify-center border-b border-[color:var(--border)] bg-[var(--surface-1)] px-2 py-2.5 sm:px-4">
-            <CenterModeSwitcher
-              value={centerMode}
-              onChange={setCenterMode}
-              showLive={showWarRoomCenter}
-              liveLabel={
-                operationMode === "COUNTING_DAY"
-                  ? "Counting live"
-                  : operationMode !== "PRE-POLL"
-                    ? "Voting live"
-                    : "Live"
-              }
-            />
-          </div>
+      />
 
-          {centerMode === "live" ? (
-            <div className="flex items-center justify-center gap-2 border-b border-[color:var(--border)] bg-[var(--surface-1)] px-3 py-2">
-              <div className="eb-pills" role="tablist" aria-label="Live tabs">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={liveTab === "TURNOUT"}
-                  data-active={liveTab === "TURNOUT"}
-                  onClick={() => setLiveTab("TURNOUT")}
-                  className="eb-pill"
-                >
-                  <Activity className="h-3.5 w-3.5" aria-hidden /> Live turnout
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={liveTab === "EXIT_POLLS"}
-                  data-active={liveTab === "EXIT_POLLS"}
-                  onClick={() => setLiveTab("EXIT_POLLS")}
-                  className="eb-pill"
-                >
-                  <BarChart3 className="h-3.5 w-3.5" aria-hidden /> Exit polls
-                </button>
-              </div>
-            </div>
-          ) : null}
-
-          <div className="flex-1 min-h-0">
-            <CenterPane
-              mode={centerMode}
-              globalStateFilter={globalStateFilter}
-              onChangeGlobalStateFilter={handleStateFilter}
-              liveTab={liveTab}
-              onChangeLiveTab={setLiveTab}
-              globalConstituencyId={globalConstituencyId}
-              setGlobalConstituencyId={setGlobalConstituencyId}
-              flyToState={flyToState}
-              setFlyToState={setFlyToState}
-              setActiveSignal={(s) => setActiveSignal(s == null ? null : (s as Signal))}
-              setActiveClusterSignals={(s) => setActiveClusterSignals(s == null ? null : (s as Signal[]))}
-              mapOverlayMode={mapOverlayMode}
-              setMapOverlayMode={setMapOverlayMode}
-              mapVerifiedOnly={mapVerifiedOnly}
-              toggleMapVerifiedOnly={() => setMapVerifiedOnly((v) => !v)}
-              resetTrigger={resetTrigger}
-              stateViewSnapTrigger={stateViewSnapTrigger}
-              onZoomChange={setMapZoom}
-              mobilePaneForMapChrome={mobilePaneForMapChrome}
-            />
-          </div>
-        </div>
-      </main>
-
-      <aside className={`fixed top-[40px] bottom-[28px] max-[819px]:bottom-[56px] left-0 w-full lg:w-[288px] z-40 bg-[var(--surface-1)] border-r border-[color:var(--border)] transition-transform duration-300 ${mobileTab === "briefing" ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}>
-        <SignalPane
-          globalStateFilter={globalStateFilter}
-          globalConstituencyId={globalConstituencyId}
-          centerMode={centerMode}
-          onChangeGlobalStateFilter={handleStateFilter}
-          onSelectSignal={(s: unknown) => {
-            setActiveSignal(s as Signal);
-            const nextMode = centerModeForSignal(s);
-            setCenterMode(nextMode);
-            if (!isTabletUp) setMobileTab("center");
-          }}
-          onOpenSignals={() => {
-            if (!isTabletUp) setMobileTab("center");
-            setCenterMode("signals");
-          }}
-        />
-      </aside>
-
-      <aside className={`fixed top-[40px] z-40 bg-[var(--surface-1)] border-l border-[color:var(--border)] transition-transform duration-300 right-0 flex min-h-0 flex-col overflow-hidden bottom-[28px] max-[819px]:bottom-[56px] ${
-        isTabletUp
-          ? "w-[288px] translate-x-0"
-          : `w-full ${mobileTab === "intel" ? "translate-x-0" : "translate-x-full"}`
-      }`}>
-        <IntelPane
-          globalStateFilter={globalStateFilter}
-          setGlobalStateFilter={handleStateFilter}
-          globalConstituencyId={globalConstituencyId}
-          setGlobalConstituencyId={setGlobalConstituencyId}
-          // Mobile: always allow jumping to map for the current state, even if Intel was opened directly.
-          onBackToMap={backToMapFromIntel}
-        />
-      </aside>
-
-      {/* DESKTOP & MOBILE FLOATING RESET BUTTON */}
-      {/* FIX: Button appears if a state is selected, a constituency is selected, OR if the user manually zoomed the map in! */}
-      {showMapResetButton &&
-        (globalConstituencyId != null ||
-          mapZoom > 1.15 ||
-          globalStateFilter !== "ALL") && (
-        <div
-          className="fixed left-1/2 z-[58] flex -translate-x-1/2 flex-col items-center gap-2 animate-fade-in-up md:flex-row"
-          style={{
-            bottom: "calc(var(--map-footer-stack, 28px) + 22px + var(--war-hud-reserve, 0px))",
-          }}
-        >
-          <div ref={mapActionsRef} className="relative">
-            <button
-              type="button"
-              onClick={() => setMapActionsOpen((v) => !v)}
-              className="flex items-center gap-2 rounded-full border border-[color:var(--border)] bg-[var(--surface-1)]/95 px-4 py-2 text-sm font-medium text-[var(--text-primary)] shadow-[0_2px_8px_rgba(0,0,0,0.08),0_8px_24px_rgba(0,0,0,0.06)] backdrop-blur-md transition-[transform,box-shadow] hover:bg-[var(--surface-2)] active:scale-[0.98]"
-              aria-expanded={mapActionsOpen}
-              aria-haspopup="menu"
-            >
-              <Layers className="h-4 w-4 text-[var(--text-muted)]" aria-hidden />
-              Map
-              <ChevronDown className={`h-4 w-4 text-[var(--text-muted)] transition-transform duration-200 ${mapActionsOpen ? "rotate-180" : ""}`} aria-hidden />
-            </button>
-
-            {mapActionsOpen ? (
-              <div
-                className="absolute bottom-full left-1/2 z-[59] mb-2 w-[min(288px,calc(100vw-1.5rem))] -translate-x-1/2 overflow-hidden rounded-2xl border border-[color:var(--border)] bg-[var(--surface-1)] shadow-[0_8px_32px_rgba(0,0,0,0.2)] backdrop-blur-md"
-                role="menu"
-                aria-label="Map actions"
-              >
-                <div className="border-b border-[color:var(--border)] px-3 py-2">
-                  <p className="text-xs font-medium text-[var(--text-muted)]">Map actions</p>
-                </div>
-                <div className="p-1.5">
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      handleMapChromeResetClick();
-                      setMapActionsOpen(false);
-                    }}
-                    className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-[var(--surface-2)] active:bg-[var(--surface-2)]"
-                  >
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--surface-2)] text-[var(--text-muted)]">
-                      {globalStateFilter === "ALL" || atStateDefaultView ? (
-                        <Globe2 className="h-5 w-5" aria-hidden />
-                      ) : (
-                        <MapPinned className="h-5 w-5" aria-hidden />
-                      )}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-medium text-[var(--text-primary)]">
-                        {globalStateFilter === "ALL" || atStateDefaultView ? "National overview" : "State overview"}
-                      </span>
-                      <span className="mt-0.5 block text-xs leading-snug text-[var(--text-muted)]">
-                        {globalStateFilter === "ALL" || atStateDefaultView
-                          ? "Reset zoom and show all states"
-                          : "Fit map to this state again"}
-                      </span>
-                    </span>
-                  </button>
-
-                  {!isMdUp && mobileTab === "center" && centerMode === "map" ? (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={openIntelFromMap}
-                      className="mt-0.5 flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-[var(--surface-2)] active:bg-[var(--surface-2)]"
-                    >
-                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--surface-2)] text-[var(--text-muted)]">
-                        <Database className="h-5 w-5" aria-hidden />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-medium text-[var(--text-primary)]">State intel</span>
-                        <span className="mt-0.5 block text-xs leading-snug text-[var(--text-muted)]">Constituencies, list &amp; hotspots</span>
-                      </span>
-                    </button>
-                  ) : null}
-
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMapOverlayMode((m) => (m === "VIDEOS" ? "ALL" : "VIDEOS"));
-                      setMapActionsOpen(false);
-                    }}
-                    className="mt-0.5 flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-[var(--surface-2)] active:bg-[var(--surface-2)]"
-                  >
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--surface-2)] text-[var(--text-muted)]">
-                      {mapOverlayMode === "VIDEOS" ? (
-                        <Layers className="h-5 w-5" aria-hidden />
-                      ) : (
-                        <Clapperboard className="h-5 w-5" aria-hidden />
-                      )}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-medium text-[var(--text-primary)]">
-                        {mapOverlayMode === "VIDEOS" ? "All signal markers" : "Video markers only"}
-                      </span>
-                      <span className="mt-0.5 block text-xs leading-snug text-[var(--text-muted)]">
-                        {mapOverlayMode === "VIDEOS"
-                          ? "Show every OSINT point on the map"
-                          : "Limit the map to video tiles"}
-                      </span>
-                    </span>
-                  </button>
-                </div>
-              </div>
-            ) : null}
-          </div>
-        </div>
-      )}
-
-      <nav
-        className={`fixed bottom-0 left-0 right-0 bg-[var(--surface-1)] border-t border-[color:var(--border)] z-50 pb-safe ${isTabletUp ? "hidden" : "flex"} lg:hidden`}
-        style={{ minHeight: 56 }}
-        aria-label="Primary"
-      >
-        <button
-          type="button"
-          onClick={() => setMobileTab("briefing")}
-          aria-label="Feed"
-          aria-pressed={mobileTab === "briefing"}
-          className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium hit-44 transition-colors ${mobileTab === "briefing" ? "text-[var(--brand)]" : "text-[var(--text-muted)]"}`}
-        >
-          <Sparkles className="h-5 w-5" aria-hidden="true" />
-          Feed
-          <span className={`mt-0.5 h-0.5 w-6 rounded-full ${mobileTab === "briefing" ? "bg-[var(--brand)]" : "bg-transparent"}`} />
-        </button>
-        <button
-          type="button"
-          onClick={() => setMobileTab("center")}
-          aria-label="Dashboard"
-          aria-pressed={mobileTab === "center"}
-          className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium hit-44 transition-colors ${mobileTab === "center" ? "text-[var(--brand)]" : "text-[var(--text-muted)]"}`}
-        >
-          <LayoutPanelTop className="h-5 w-5" aria-hidden="true" />
-          Dashboard
-          <span className={`mt-0.5 h-0.5 w-6 rounded-full ${mobileTab === "center" ? "bg-[var(--brand)]" : "bg-transparent"}`} />
-        </button>
-        <button
-          type="button"
-          onClick={() => { setMobileTab("intel"); }}
-          aria-label="Seats"
-          aria-pressed={mobileTab === "intel"}
-          className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium hit-44 transition-colors ${mobileTab === "intel" ? "text-[var(--brand)]" : "text-[var(--text-muted)]"}`}
-        >
-          <Database className="h-5 w-5" aria-hidden="true" />
-          Seats
-          <span className={`mt-0.5 h-0.5 w-6 rounded-full ${mobileTab === "intel" ? "bg-[var(--brand)]" : "bg-transparent"}`} />
-        </button>
-      </nav>
-
-      <BottomBar />
-      {activeClusterSignals && activeClusterSignals.length > 0 && (
-        <SignalClusterModal
-          signals={activeClusterSignals}
-          onClose={() => setActiveClusterSignals(null)}
-          onPick={(s) => {
-            setActiveClusterSignals(null);
-            setActiveSignal(s as Signal);
-          }}
-        />
-      )}
-      {activeSignal && <SignalModal signal={activeSignal} onClose={() => setActiveSignal(null)} />}
-
-      {moreOpen ? (
-        <div className="fixed inset-0 z-[90] flex items-end md:items-center justify-center bg-black/40 p-2" role="dialog" aria-modal="true">
-          <div className="w-full max-w-[520px] rounded-[var(--radius-lg)] border border-[color:var(--border)] bg-[var(--surface-1)] shadow-[var(--shadow-modal)]">
-            <div className="flex items-center justify-between border-b border-[color:var(--border)] px-4 py-3">
-              <h2 className="text-[14px] font-semibold text-[var(--text-primary)]">More</h2>
-              <button type="button" onClick={() => setMoreOpen(false)} className="eb-btn-ghost">Close</button>
-            </div>
-            <div className="px-4 py-3">
-              <button
-                type="button"
-                className="w-full rounded-[var(--radius)] border border-[color:var(--border)] bg-[var(--surface-1)] px-3 py-2.5 text-left hover:bg-[var(--surface-2)] transition-colors"
-                onClick={() => { setCenterMode("signals"); if (!isTabletUp) setMobileTab("center"); setMoreOpen(false); }}
-              >
-                <div className="text-[13px] font-semibold text-[var(--text-primary)]">Open news feed</div>
-                <div className="mt-0.5 text-[12px] text-[var(--text-muted)]">Every story, filterable by state.</div>
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <AppShell />
     </>
-  );
+  )
 }
+

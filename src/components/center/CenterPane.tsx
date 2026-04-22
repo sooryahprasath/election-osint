@@ -88,7 +88,10 @@ export default function CenterPane({
           globalStateFilter={globalStateFilter}
           globalConstituencyId={globalConstituencyId}
           onChangeGlobalStateFilter={onChangeGlobalStateFilter}
-          onSelectConstituency={(id) => setGlobalConstituencyId(id)}
+          onSelectConstituency={(id) => {
+            if (typeof setGlobalConstituencyId !== "function") return;
+            setGlobalConstituencyId(id);
+          }}
         />
       </div>
     );
@@ -100,9 +103,11 @@ export default function CenterPane({
         activeState={globalStateFilter}
         activeConstituencyId={globalConstituencyId}
         onSelectConstituency={(id) => {
+          if (typeof setGlobalConstituencyId !== "function") return;
           setGlobalConstituencyId(id);
         }}
         onSelectState={(s) => {
+          if (typeof setGlobalConstituencyId !== "function") return;
           setGlobalConstituencyId(null);
           onChangeGlobalStateFilter(s);
           setFlyToState(s === "ALL" ? "India" : s);

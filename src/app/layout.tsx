@@ -20,14 +20,17 @@ const siteUrl = getSiteUrl();
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: "DHARMA-OSINT | 2026 Election Intelligence",
-    template: "%s | DHARMA-OSINT",
+    default: "Election Watch India 2026 — Live Signals, Candidates & Seat Insights",
+    template: "%s | Election Watch India 2026",
   },
   description:
-    "Real-time situational awareness dashboard for the 2026 Indian State Assembly Elections — Kerala, Assam, Tamil Nadu, West Bengal, Puducherry.",
-  applicationName: "DHARMA-OSINT",
+    "Election Watch for India’s 2026 state assembly elections: live news signals, candidate dossiers (assets & criminal cases), maps, and 2021 seat results for Tamil Nadu, Kerala, West Bengal, Assam, and Puducherry.",
+  applicationName: "Election Watch India 2026",
   keywords: [
     "India elections 2026",
+    "election watch",
+    "India election watch",
+    "voter vibe",
     "OSINT dashboard",
     "election intelligence",
     "Kerala election",
@@ -36,23 +39,25 @@ export const metadata: Metadata = {
     "West Bengal election",
     "Puducherry election",
     "ECI",
+    "candidate assets",
+    "criminal cases",
     "assembly elections",
   ],
-  authors: [{ name: "DHARMA-OSINT" }],
+  authors: [{ name: "Election Watch" }],
   openGraph: {
     type: "website",
     locale: "en_IN",
     url: siteUrl,
-    siteName: "DHARMA-OSINT",
-    title: "DHARMA-OSINT | 2026 Election Intelligence",
+    siteName: "Election Watch India 2026",
+    title: "Election Watch India 2026",
     description:
-      "Live map, signals, and intel for 2026 state assembly elections across five regions.",
+      "Live map, signals, and candidate intel for India’s 2026 state assembly elections. 2021 seat results + constituency insights.",
   },
   twitter: {
     card: "summary_large_image",
-    title: "DHARMA-OSINT | 2026 Election Intelligence",
+    title: "Election Watch India 2026",
     description:
-      "Live map, signals, and intel for 2026 state assembly elections across five regions.",
+      "Live map, signals, and candidate intel for India’s 2026 state assembly elections. 2021 seat results + constituency insights.",
   },
   robots: {
     index: true,
@@ -61,6 +66,10 @@ export const metadata: Metadata = {
   alternates: {
     canonical: siteUrl,
   },
+  icons: {
+    icon: "/icon.svg",
+  },
+  manifest: "/manifest.webmanifest",
 };
 
 export const viewport: Viewport = {
