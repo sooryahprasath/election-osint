@@ -179,22 +179,12 @@ export default function ConstituencyCard({ constituency, initialCandidate, onCon
         </div>
       </div>
 
-      {/* GPS */}
-      <div className="px-3 py-1.5 border-b border-[color:var(--border)] flex items-center gap-2">
-        <TrendingUp className="h-3 w-3 text-[var(--text-muted)]" />
-        <span className="font-mono text-[9px] text-[var(--text-muted)]">
-          {constituency.latitude != null && constituency.longitude != null
-            ? `GPS: ${constituency.latitude.toFixed(4)}°N, ${constituency.longitude.toFixed(4)}°E`
-            : "GPS: coordinates not available"}
-        </span>
-      </div>
-
       {/* Candidates */}
       <div className="px-3 py-2 border-b border-[color:var(--border)] flex items-center justify-between gap-2 bg-[var(--surface-2)]">
         <span className="font-mono text-[10px] font-bold text-[var(--text-secondary)] tracking-wider">
-          ◆ CANDIDATE MANIFEST
+          ◆ Candidates ({candidates.length})
         </span>
-        <span className="font-mono text-[9px] text-[var(--text-muted)]">{candidates.length} total</span>
+        <span className="font-mono text-[11px] text-[var(--text-muted)]">Declared for this seat</span>
       </div>
       <div className="flex flex-col">
         {candidates.length > 0 ? (

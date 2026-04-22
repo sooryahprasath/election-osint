@@ -71,3 +71,6 @@ yarn-error.log*
 
 # ─── Artifacts (UI screenshots, captured files) ───────────────────────────────
 artifacts/
+# Regenerate with `node scripts/capture-ui.mjs` / audit scripts — keep repo lean
+/ui-audit/before/**/*.png
+/ui-audit/after/**/*.png

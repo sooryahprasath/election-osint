@@ -28,6 +28,12 @@ type ConstituencyResult2021 = {
 
 const STATES = ["ALL", "Tamil Nadu", "Kerala", "West Bengal", "Assam", "Puducherry"]
 
+/**
+ * Flip to true (via NEXT_PUBLIC_SHOW_DEV_HINTS=true) to surface ingest/script hints
+ * for operators. Public viewers see friendlier copy.
+ */
+const SHOW_DEV_HINTS = process.env.NEXT_PUBLIC_SHOW_DEV_HINTS === "true"
+
 const STATE_MAP_FILES: Record<string, string> = {
   "Kerala": "kerala.json",
   "Assam": "assam.json",
@@ -206,17 +212,20 @@ function SeatShareArc({
   counts,
   title,
   colorMode,
+  tile = false,
 }: {
   totalSeats: number
   counts: Array<{ key: string; count: number }>
   title: string
   colorMode: SeatShareMode
+  /** Flush cell in a hairline grid (no outer radius / border). */
+  tile?: boolean
 }) {
   const total = Math.max(0, Number(totalSeats || 0))
   if (!total) {
     return (
-      <div className="flex h-[170px] flex-col items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 text-center">
-        <div className="font-mono text-[10px] font-bold tracking-wider text-[var(--text-secondary)]">{title}</div>
+      <div className={`flex h-[170px] flex-col items-center justify-center bg-[var(--surface-1)] p-3 text-center ${tile ? "rounded-none border-0" : "rounded-lg border border-[var(--border)]"}`}>
+        <div className="eb-eyebrow">{title}</div>
         <div className="mt-2 font-mono text-[10px] text-[var(--text-muted)]">No 2021 seat results loaded.</div>
       </div>
     )
@@ -272,25 +281,99 @@ function SeatShareArc({
   const topLegend = counts.slice(0, 6)
 
   return (
-    <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3">
+    <div className={`bg-[var(--surface-1)] p-3 ${tile ? "rounded-none border-0" : "rounded-lg border border-[var(--border)]"}`}>
       <div className="flex items-center justify-between gap-3">
-        <div className="font-mono text-[10px] font-bold tracking-wider text-[var(--text-secondary)]">{title}</div>
-        <div className="font-mono text-[9px] text-[var(--text-muted)]">{total} seats</div>
+        <div className="eb-eyebrow">{title}</div>
+        <div className="font-mono text-[11px] text-[var(--text-muted)]">{total} seats total</div>
       </div>
       <div className="mt-2 flex items-center justify-center overflow-visible">
         <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMidYMid meet" className="h-auto w-full max-w-[360px]">
           {dotEls}
-          <text x={cx} y={height - 12} textAnchor="middle" fill="var(--text-secondary)" fontSize="20" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace" fontWeight="800">
-            {total}
-          </text>
+          {/* Largest winner */}
+          {counts[0] && (
+            <>
+              <text x={cx} y={height - 26} textAnchor="middle" fill="var(--text-secondary)" fontSize="18" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace" fontWeight="800">
+                {counts[0].count}/{total}
+              </text>
+              <text x={cx} y={height - 10} textAnchor="middle" fill="var(--text-muted)" fontSize="10" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace">
+                {counts[0].key} · {Math.round((counts[0].count/total)*100)}%
+              </text>
+            </>
+          )}
         </svg>
       </div>
       <div className="mt-2 flex flex-wrap gap-2">
         {topLegend.map((r) => (
           <div key={r.key} className="inline-flex items-center gap-1 rounded border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1">
-            <span className="h-2 w-2 rounded-sm" style={{ background: seatShareColor(colorMode, r.key) }} />
-            <span className="font-mono text-[9px] font-bold text-[var(--text-secondary)]">{r.key}</span>
-            <span className="font-mono text-[9px] text-[var(--text-muted)]">{r.count}</span>
+            <span className="h-2.5 w-2.5 rounded-sm" style={{ background: seatShareColor(colorMode, r.key) }} />
+            <span className="font-mono text-[11px] font-bold text-[var(--text-secondary)]">{r.key}</span>
+            <span className="font-mono text-[11px] text-[var(--text-muted)]">{r.count} ({Math.round((r.count/total)*100)}%)</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** Proportional stacked bar — used for small states (< 80 seats) */
+function SeatShareBar({
+  totalSeats,
+  counts,
+  title,
+  colorMode,
+  tile = false,
+}: {
+  totalSeats: number
+  counts: Array<{ key: string; count: number }>
+  title: string
+  colorMode: SeatShareMode
+  tile?: boolean
+}) {
+  const total = Math.max(0, Number(totalSeats || 0))
+  if (!total) return (
+    <div className={`flex h-[100px] flex-col items-center justify-center bg-[var(--surface-1)] p-3 text-center ${tile ? "rounded-none border-0" : "rounded-lg border border-[var(--border)]"}`}>
+      <div className="eb-eyebrow">{title}</div>
+      <div className="mt-2 font-mono text-[10px] text-[var(--text-muted)]">No 2021 results.</div>
+    </div>
+  )
+  const topLegend = counts.slice(0, 6)
+  return (
+    <div className={`bg-[var(--surface-1)] p-3 ${tile ? "rounded-none border-0" : "rounded-lg border border-[var(--border)]"}`}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="eb-eyebrow">{title}</div>
+        <div className="font-mono text-[11px] text-[var(--text-muted)]">{total} seats</div>
+      </div>
+      {/* Stacked proportional bar */}
+      <div className="mt-3 flex h-8 w-full overflow-hidden rounded-md">
+        {counts.map((r) => {
+          const pct = (r.count / total) * 100
+          const color = seatShareColor(colorMode, r.key)
+          return (
+            <div
+              key={r.key}
+              title={`${r.key}: ${r.count} (${Math.round(pct)}%)`}
+              style={{ width: `${pct}%`, backgroundColor: color, minWidth: r.count > 0 ? "2px" : 0 }}
+            />
+          )
+        })}
+      </div>
+      {/* Winner callout */}
+      {counts[0] && (
+        <div className="mt-2 flex items-center gap-2">
+          <span className="h-3 w-3 rounded-sm shrink-0" style={{ background: seatShareColor(colorMode, counts[0].key) }} />
+          <span className="font-mono text-[13px] font-bold text-[var(--text-primary)]">{counts[0].key}</span>
+          <span className="font-mono text-[11px] text-[var(--text-muted)]">
+            {counts[0].count}/{total} · {Math.round((counts[0].count / total) * 100)}%
+          </span>
+        </div>
+      )}
+      {/* Legend */}
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {topLegend.map((r) => (
+          <div key={r.key} className="inline-flex items-center gap-1 rounded border border-[var(--border)] bg-[var(--surface-2)] px-1.5 py-0.5">
+            <span className="h-2 w-2 rounded-sm shrink-0" style={{ background: seatShareColor(colorMode, r.key) }} />
+            <span className="font-mono text-[10px] font-bold text-[var(--text-secondary)]">{r.key}</span>
+            <span className="font-mono text-[10px] text-[var(--text-muted)]">{r.count} ({Math.round((r.count/total)*100)}%)</span>
           </div>
         ))}
       </div>
@@ -326,7 +409,7 @@ function MiniSeatMap({
     <div className="flex h-full min-h-[180px] flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
       {/* Header strip */}
       <div className="flex shrink-0 items-center justify-between border-b border-[var(--border)] px-2.5 py-1.5">
-        <span className="font-mono text-[9px] font-bold tracking-widest text-[var(--text-muted)] uppercase">Seat Location</span>
+        <span className="eb-eyebrow">Seat Location</span>
         <span className="font-mono text-[9px] text-[var(--text-muted)]">{state || "—"}</span>
       </div>
       {/* Map fills remaining height */}
@@ -406,28 +489,69 @@ function MiniBar({
   max,
   color,
   suffix,
+  showPct = false,
+  total,
 }: {
   label: string
   value: number
   max: number
   color: string
   suffix?: string
+  showPct?: boolean
+  total?: number
 }) {
   const pct = max > 0 ? Math.round((value / max) * 100) : 0
+  const valuePct = total && total > 0 ? Math.round((value / total) * 100) : null
   return (
     <div className="flex items-center gap-2">
-      <span className="w-28 shrink-0 truncate font-mono text-[10px] text-[var(--text-secondary)]">
+      <span className="w-24 shrink-0 truncate font-mono text-[11px] text-[var(--text-secondary)]">
         {label}
       </span>
       <div className="relative flex-1">
-        <div className="h-2 w-full overflow-hidden rounded bg-[var(--surface-3)]">
-          <div className="h-full rounded-sm" style={{ width: `${pct}%`, backgroundColor: color }} />
+        <div className="h-[10px] w-full overflow-hidden rounded bg-[var(--surface-3)]">
+          <div className="h-full rounded-sm transition-all duration-300" style={{ width: `${pct}%`, backgroundColor: color }} />
         </div>
       </div>
-      <span className="shrink-0 text-right font-mono text-[10px] font-bold text-[var(--text-secondary)]">
+      <span className="shrink-0 min-w-[3rem] text-right font-mono text-[11px] font-bold text-[var(--text-secondary)]">
         {value}{suffix ?? ""}
+        {showPct && valuePct !== null ? (
+          <span className="ml-1 font-normal text-[var(--text-muted)]">({valuePct}%)</span>
+        ) : null}
       </span>
     </div>
+  )
+}
+
+/**
+ * Mobile-only collapsible wrapper. Renders children normally on md+, and as a
+ * collapsible section on mobile so heavy analytics blocks don't drown the view.
+ */
+function MobileCollapsible({
+  title,
+  defaultOpen = false,
+  children,
+}: {
+  title: string
+  defaultOpen?: boolean
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <>
+      <div className="md:hidden">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="hit-44 flex w-full items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-left"
+        >
+          <span className="font-sans text-[13px] font-semibold text-[var(--text-primary)]">{title}</span>
+          <span className="font-mono text-[11px] text-[var(--text-muted)]">{open ? "−" : "+"}</span>
+        </button>
+        {open ? <div className="mt-2">{children}</div> : null}
+      </div>
+      <div className="hidden md:block">{children}</div>
+    </>
   )
 }
 
@@ -440,7 +564,7 @@ export default function InsightsCenterPane({
   globalStateFilter: string
   globalConstituencyId: string | null
   onChangeGlobalStateFilter: (s: string) => void
-  onSelectConstituency: (id: string) => void
+  onSelectConstituency: (id: string | null) => void
 }) {
   const { constituencies, candidates, ensureCandidatesForPrefixes, candidateCounts, criminalCounts } = useLiveData()
   const [activeState, setActiveState] = useState<string>(() => (globalStateFilter && globalStateFilter !== "ALL" ? globalStateFilter : "ALL"))
@@ -476,10 +600,17 @@ export default function InsightsCenterPane({
   }, [globalConstituencyId, selectedSeatId])
 
   useEffect(() => {
-    if (!activeState || activeState === "ALL") return
+    if (!activeState) return
+    if (activeState === "ALL") {
+      const prefixes = STATES.filter((s) => s !== "ALL")
+        .map((s) => STATE_META[s]?.dbPrefix)
+        .filter(Boolean) as string[]
+      void ensureCandidatesForPrefixes(prefixes)
+      return
+    }
     const prefix = STATE_META[activeState]?.dbPrefix
     if (!prefix) return
-    ensureCandidatesForPrefixes([prefix])
+    void ensureCandidatesForPrefixes([prefix])
   }, [activeState, ensureCandidatesForPrefixes])
 
   useEffect(() => {
@@ -824,8 +955,41 @@ export default function InsightsCenterPane({
     return (candidates as any[]).filter((c) => String(c.constituency_id || "").startsWith(prefix))
   }, [candidates, activeState])
 
-  const selectedSeatWinnerCand = useMemo(() => bestCandidateMatch(stateCandidatesForHistory, seatResult?.winner_name), [stateCandidatesForHistory, seatResult?.winner_name])
-  const selectedSeatRunnerCand = useMemo(() => bestCandidateMatch(stateCandidatesForHistory, seatResult?.runner_up_name), [stateCandidatesForHistory, seatResult?.runner_up_name])
+  // Prefer match within the currently selected seat. If none, fall back to a state-wide match
+  // (used only to detect the "moved seat" case and render a secondary hint — never auto-nav).
+  const inSeatWinnerCand = useMemo(
+    () => bestCandidateMatch(selectedSeatCandidates, seatResult?.winner_name),
+    [selectedSeatCandidates, seatResult?.winner_name]
+  )
+  const inSeatRunnerCand = useMemo(
+    () => bestCandidateMatch(selectedSeatCandidates, seatResult?.runner_up_name),
+    [selectedSeatCandidates, seatResult?.runner_up_name]
+  )
+  const stateWideWinnerCand = useMemo(
+    () => bestCandidateMatch(stateCandidatesForHistory, seatResult?.winner_name),
+    [stateCandidatesForHistory, seatResult?.winner_name]
+  )
+  const stateWideRunnerCand = useMemo(
+    () => bestCandidateMatch(stateCandidatesForHistory, seatResult?.runner_up_name),
+    [stateCandidatesForHistory, seatResult?.runner_up_name]
+  )
+  // Legacy aliases kept for any existing reads; now prefer in-seat match for photos etc.
+  const selectedSeatWinnerCand = inSeatWinnerCand || stateWideWinnerCand
+  const selectedSeatRunnerCand = inSeatRunnerCand || stateWideRunnerCand
+
+  const movedWinner =
+    !inSeatWinnerCand && stateWideWinnerCand && String(stateWideWinnerCand.constituency_id || "") !== String(selectedSeatId || "")
+      ? stateWideWinnerCand
+      : null
+  const movedRunner =
+    !inSeatRunnerCand && stateWideRunnerCand && String(stateWideRunnerCand.constituency_id || "") !== String(selectedSeatId || "")
+      ? stateWideRunnerCand
+      : null
+  const constNameById = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const c of constituencies as any[]) m.set(String(c.id), String(c.name || c.id))
+    return m
+  }, [constituencies])
 
   const allViewExtras = useMemo(() => {
     if (activeState !== "ALL") return null
@@ -838,6 +1002,11 @@ export default function InsightsCenterPane({
     rows.sort((a, b) => b.rate - a.rate)
     return rows
   }, [activeState, candidateCounts, criminalCounts])
+
+  const overviewCandidateHeadcount = useMemo(
+    () => STATES.filter((s) => s !== "ALL").reduce((acc, st) => acc + Number(candidateCounts[st] ?? 0), 0),
+    [candidateCounts]
+  )
 
   const constituencyOptions = useMemo(() => {
     if (activeState === "ALL") return []
@@ -1036,164 +1205,259 @@ export default function InsightsCenterPane({
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-[var(--surface-0)]">
-      <div className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-2.5">
-        <Sparkles className="h-3.5 w-3.5 text-[#0ea5e9]" />
-        <span className="font-mono text-[11px] font-bold tracking-wider text-[var(--text-primary)]">
-          INSIGHTS
-        </span>
-        <span className="ml-auto font-mono text-[10px] text-[var(--text-muted)]">
-          scope: {activeState}
-        </span>
+      {/* ── Filter bar — state selector always visible, constituency+toggle only when state selected ── */}
+      {/* Row 1 — state selector (ALWAYS visible) */}
+      <div className="border-b border-[var(--border)] bg-[var(--surface-1)]">
+        {/* Desktop: state pills + (All view) seat-share mode */}
+        <div className="hidden md:flex flex-wrap items-center justify-center gap-x-3 gap-y-2 px-3 pt-2.5 pb-2">
+          <div className="eb-pills shrink-0">
+            {STATES.map((s) => {
+              const active = activeState === s
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  data-active={active}
+                  onClick={() => { setActiveState(s); setSelectedSeatId(null); onChangeGlobalStateFilter(s) }}
+                  className="eb-pill shrink-0"
+                >
+                  {s === "ALL" ? "All" : (STATE_META[s]?.abbr || s)}
+                </button>
+              )
+            })}
+          </div>
+          {activeState === "ALL" ? (
+            <div className="flex w-full min-w-0 flex-wrap items-center justify-center gap-2 border-t border-[var(--border)] pt-2 md:w-auto md:border-t-0 md:pt-0">
+              <span className="text-[11px] font-medium text-[var(--text-muted)] whitespace-nowrap">Seat share by</span>
+              <div className="eb-pills shrink-0" role="group" aria-label="Seat share mode">
+                <button type="button" data-active={seatShareMode === "PARTY"} onClick={() => setSeatShareMode("PARTY")} className="eb-pill">Party</button>
+                <button type="button" data-active={seatShareMode === "ALLIANCE"} onClick={() => setSeatShareMode("ALLIANCE")} className="eb-pill">Alliance</button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        {/* Mobile: state select, full-width, 44px */}
+        <select
+          value={activeState}
+          onChange={(e) => { const s = e.target.value; setActiveState(s); setSelectedSeatId(null); onChangeGlobalStateFilter(s) }}
+          className="md:hidden w-full h-11 border-0 border-b border-[var(--border)] bg-[var(--surface-1)] px-3 text-[14px] font-medium text-[var(--text-primary)] focus:outline-none"
+          aria-label="State"
+        >
+          {STATES.map((s) => (
+            <option key={s} value={s}>
+              {s === "ALL" ? "All states" : `${STATE_META[s]?.abbr || s} · ${s}`}
+            </option>
+          ))}
+        </select>
+
+        {activeState === "ALL" ? (
+          <div className="md:hidden flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border)] bg-[var(--surface-1)] px-3 py-2.5">
+            <span className="text-[12px] font-medium text-[var(--text-muted)]">Seat share by</span>
+            <div className="eb-pills shrink-0" role="group" aria-label="Seat share mode">
+              <button type="button" data-active={seatShareMode === "PARTY"} onClick={() => setSeatShareMode("PARTY")} className="eb-pill">Party</button>
+              <button type="button" data-active={seatShareMode === "ALLIANCE"} onClick={() => setSeatShareMode("ALLIANCE")} className="eb-pill">Alliance</button>
+            </div>
+          </div>
+        ) : null}
+
       </div>
 
-      <div className="flex items-center gap-2 overflow-x-auto border-b border-[var(--border)] px-3 py-2 scrollbar-none">
-        <div className="max-md:hidden flex items-center gap-2">
-          {STATES.map((s) => {
-            const active = activeState === s
-            return (
-              <button
-                key={s}
-                type="button"
-                onClick={() => {
-                  setActiveState(s)
-                  setSelectedSeatId(null)
-                  onChangeGlobalStateFilter(s)
+      <div className="flex min-h-0 flex-1 flex-col bg-[var(--surface-0)]">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        {activeState !== "ALL" ? (
+          <div className="sticky top-0 z-20 border-b border-[var(--border)] bg-[var(--surface-1)] px-3 py-2.5 md:static md:z-auto">
+            <div className="flex flex-nowrap items-center gap-3">
+              <select
+                value={selectedSeatId ?? ""}
+                onChange={(e) => {
+                  const id = e.target.value
+                  if (!id) {
+                    setSelectedSeatId(null)
+                    onSelectConstituency(null)
+                    return
+                  }
+                  setSelectedSeatId(id)
+                  const seat = constituencies.find((c: any) => String(c.id) === String(id))
+                  if (seat?.state) onChangeGlobalStateFilter(String(seat.state))
+                  onSelectConstituency(id)
                 }}
+                className="h-11 min-w-0 w-full flex-1 rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--surface-1)] px-2 text-[13px] text-[var(--text-primary)] md:h-10 md:max-w-[280px]"
+                aria-label="Constituency"
+              >
+                <option value="">All constituencies</option>
+                {constituencyOptions.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+              <div
                 className={[
-                  "shrink-0 rounded px-2 py-1 font-mono text-[9px] font-bold tracking-wider transition-colors",
-                  active ? "border border-sky-500/40 bg-sky-500/10 text-[#0ea5e9]" : "border border-transparent text-[var(--text-muted)] hover:bg-[var(--surface-2)]",
+                  "ml-auto flex min-w-0 shrink-0 items-center gap-2",
+                  selectedSeatId ? "max-md:hidden" : "",
                 ].join(" ")}
               >
-                {STATE_META[s]?.abbr || (s === "ALL" ? "ALL" : s)}
-              </button>
-            )
-          })}
-        </div>
-
-        <div className="md:hidden flex flex-1 items-center gap-2">
-          <span className="shrink-0 font-mono text-[9px] text-[var(--text-muted)]">Scope</span>
-          <select
-            value={activeState}
-            onChange={(e) => {
-              const s = e.target.value
-              setActiveState(s)
-              setSelectedSeatId(null)
-              onChangeGlobalStateFilter(s)
-            }}
-            className="h-7 flex-1 rounded border border-[var(--border)] bg-[var(--surface-1)] px-2 font-mono text-[10px] text-[var(--text-secondary)]"
-          >
-            {STATES.map((s) => (
-              <option key={s} value={s}>
-                {s === "ALL" ? "ALL" : STATE_META[s]?.abbr || s}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="ml-auto flex items-center gap-2">
-          <span className="font-mono text-[9px] text-[var(--text-muted)]">Seat share</span>
-          <select
-            value={seatShareMode}
-            onChange={(e) => setSeatShareMode(e.target.value as SeatShareMode)}
-            className="h-7 rounded border border-[var(--border)] bg-[var(--surface-1)] px-2 font-mono text-[10px] text-[var(--text-secondary)]"
-          >
-            <option value="PARTY">Party</option>
-            <option value="ALLIANCE">Alliance</option>
-          </select>
-          <span className="font-mono text-[9px] text-[var(--text-muted)]">Constituency</span>
-          <select
-            value={selectedSeatId ?? ""}
-            onChange={(e) => {
-              const id = e.target.value
-              if (!id) {
-                setSelectedSeatId(null)
-                return
-              }
-              setSelectedSeatId(id)
-              const seat = constituencies.find((c: any) => String(c.id) === String(id))
-              if (seat?.state) onChangeGlobalStateFilter(String(seat.state))
-              onSelectConstituency(id)
-            }}
-            disabled={activeState === "ALL"}
-            className="h-7 rounded border border-[var(--border)] bg-[var(--surface-1)] px-2 font-mono text-[10px] text-[var(--text-secondary)]"
-          >
-            <option value="">{activeState === "ALL" ? "Select a state first" : "Select constituency"}</option>
-            {constituencyOptions.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-4 gap-0 border-b border-[var(--border)] bg-[var(--surface-1)]">
-        <div className="px-3 py-2 border-r border-[var(--border)] text-center">
-          <MapPin className="h-3 w-3 text-[#0284c7] mx-auto mb-1" />
-          <div className="font-mono text-xs text-[var(--text-primary)]">{kpis.seats}</div>
-          <div className="font-mono text-[8px] text-[var(--text-muted)]">SEATS</div>
-        </div>
-        <div className="px-3 py-2 border-r border-[var(--border)] text-center">
-          <Users className="h-3 w-3 text-[#16a34a] mx-auto mb-1" />
-          <div className="font-mono text-xs text-[var(--text-primary)]">{kpis.cands}</div>
-          <div className="font-mono text-[8px] text-[var(--text-muted)]">CANDIDATES</div>
-        </div>
-        <div className="px-3 py-2 border-r border-[var(--border)] text-center">
-          <AlertTriangle className="h-3 w-3 text-[#dc2626] mx-auto mb-1" />
-          <div className="font-mono text-xs text-[var(--text-primary)]">{kpis.crim}</div>
-          <div className="font-mono text-[8px] text-[var(--text-muted)]">CRIMINAL</div>
-        </div>
-        <div className="px-3 py-2 text-center">
-          <Scale className="h-3 w-3 text-[#ea580c] mx-auto mb-1" />
-          <div className="font-mono text-[10px] text-[var(--text-primary)]">
-            {assetsDb?.median != null ? `₹${(Number(assetsDb.median) / 1e7).toFixed(Number(assetsDb.median) < 1e8 ? 1 : 0)}Cr` : "—"}
+                <span className="text-[11px] font-medium text-[var(--text-muted)] whitespace-nowrap">Seat share by</span>
+                <div className="eb-pills shrink-0" role="group" aria-label="Seat share mode">
+                  <button type="button" data-active={seatShareMode === "PARTY"} onClick={() => setSeatShareMode("PARTY")} className="eb-pill">Party</button>
+                  <button type="button" data-active={seatShareMode === "ALLIANCE"} onClick={() => setSeatShareMode("ALLIANCE")} className="eb-pill">Alliance</button>
+                </div>
+              </div>
+            </div>
           </div>
-          <div className="font-mono text-[8px] text-[var(--text-muted)]">
-            MEDIAN ASSETS · cov {assetsDb?.coveragePct != null ? `${assetsDb.coveragePct}%` : "—"}
-          </div>
-        </div>
-      </div>
+        ) : null}
 
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
-        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-mono text-[9px] font-bold tracking-wider text-[var(--text-secondary)]">DATA COVERAGE</span>
-            <span className="font-mono text-[9px] text-[var(--text-muted)]">party {kpis.coverage.party}</span>
-            <span className="font-mono text-[9px] text-[var(--text-muted)]">age {kpis.coverage.age}</span>
-            <span className="font-mono text-[9px] text-[var(--text-muted)]">gender {kpis.coverage.gender}</span>
-            <span className="font-mono text-[9px] text-[var(--text-muted)]">assets {kpis.coverage.assets}</span>
-            <span className="font-mono text-[9px] text-[var(--text-muted)]">criminal field {kpis.coverage.criminal_field}</span>
-            <span className="ml-auto font-mono text-[9px] text-[var(--text-muted)]">scope: {activeState}</span>
+        <div
+          className={
+            activeState === "ALL"
+              ? "space-y-6 px-4 pb-10 pt-2 md:space-y-8 md:px-8"
+              : "space-y-4 px-4 pb-10 pt-2 md:space-y-5 md:px-6 lg:px-7"
+          }
+        >
+        {activeState === "ALL" ? (
+          <section className="eb-insights-hero overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-sm">
+            <div className="relative z-[1] px-5 py-6 md:px-10 md:py-8">
+              <div className="mx-auto max-w-3xl text-center md:mx-0 md:max-w-2xl md:text-left">
+                <h2 className="text-[22px] font-semibold tracking-[-0.02em] leading-[1.15] text-[var(--text-primary)]">
+                  Start with your state
+                </h2>
+                <p className="mt-2 text-[13px] leading-[1.5] text-[var(--text-muted)]">
+                  Candidates, 2021 results, and live news for any Assembly seat. Sources: Election Commission of India, ADR, MyNeta.
+                </p>
+              </div>
+              <div className="mx-auto mt-6 grid max-w-3xl grid-cols-2 gap-3 md:mx-0 md:max-w-none md:grid-cols-5">
+                {STATES.filter((s) => s !== "ALL").map((s) => {
+                  const meta = STATE_META[s]
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => {
+                        setActiveState(s)
+                        setSelectedSeatId(null)
+                        onChangeGlobalStateFilter(s)
+                      }}
+                      className="group flex flex-col items-start gap-0.5 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-3 text-left shadow-sm transition-colors hover:border-[color:var(--border-strong)] hover:bg-[var(--surface-2)] md:py-3.5"
+                    >
+                      <span className="text-[13px] font-semibold tracking-[-0.005em] text-[var(--text-primary)]">{meta?.abbr || s}</span>
+                      <span className="text-[12px] text-[var(--text-secondary)]">{s}</span>
+                      <span className="text-[11px] font-mono tabular-nums text-[var(--text-muted)]">
+                        {meta?.seats ? `${meta.seats} seats` : "—"}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </section>
+        ) : null}
+        {activeState !== "ALL" ? (
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-4 py-3 shadow-sm">
+            <p className="text-[13px] leading-[1.5] text-[var(--text-secondary)]">
+              <span className="font-semibold text-[var(--text-primary)]">{activeState}</span>
+              {STATE_META[activeState]?.seats ? <span className="text-[var(--text-muted)]"> · {STATE_META[activeState]!.seats} Assembly seats (2021)</span> : null}
+              {seatShare?.counts?.[0] ? (
+                <>
+                  <span className="text-[var(--text-muted)]"> · Top party in 2021: </span>
+                  <span className="font-medium text-[var(--text-primary)]">{seatShare.counts[0].key}</span>
+                  <span className="text-[var(--text-muted)]"> ({seatShare.counts[0].count} of {seatShare.total} seats)</span>
+                </>
+              ) : null}
+              {kpis.seats > 0 && competitiveSeats?.length != null ? (
+                <>
+                  <span className="text-[var(--text-muted)]"> · </span>
+                  <span className="font-medium text-[var(--text-primary)]">{competitiveSeats.filter((s) => s.margin_votes != null && s.margin_votes <= 5000).length}</span>
+                  <span className="text-[var(--text-muted)]"> tight seats (margin &lt; 5,000)</span>
+                </>
+              ) : null}
+            </p>
+            <div className="mt-3 flex items-center divide-x divide-[var(--border)] rounded-lg border border-[var(--border)] bg-[var(--surface-1)] sm:hidden">
+              <div className="flex-1 px-2 py-2 text-center">
+                <div className="num font-mono tabular-nums text-[18px] font-bold text-[var(--text-primary)]">{kpis.seats}</div>
+                <div className="font-mono text-[9px] text-[var(--text-muted)] uppercase tracking-wide">Seats</div>
+              </div>
+              <div className="flex-1 px-2 py-2 text-center">
+                <div className="num font-mono tabular-nums text-[18px] font-bold text-[var(--text-primary)]">{kpis.cands}</div>
+                <div className="font-mono text-[9px] text-[var(--text-muted)] uppercase tracking-wide">Cands</div>
+              </div>
+              <div className="flex-1 px-2 py-2 text-center">
+                <div className="num font-mono tabular-nums text-[18px] font-bold text-[var(--text-primary)]">{kpis.crim}</div>
+                <div className="font-mono text-[9px] text-[var(--text-muted)] uppercase tracking-wide">Cases</div>
+              </div>
+              <div className="flex-1 px-2 py-2 text-center">
+                <div className="num font-mono tabular-nums text-[16px] font-bold text-[var(--text-primary)]">
+                  {assetsDb?.median != null ? `₹${(Number(assetsDb.median) / 1e7).toFixed(Number(assetsDb.median) < 1e8 ? 1 : 0)}Cr` : "—"}
+                </div>
+                <div className="font-mono text-[9px] text-[var(--text-muted)] uppercase tracking-wide">Med. assets</div>
+              </div>
+            </div>
+            <div className="mt-3 hidden sm:grid grid-cols-4 gap-0 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
+              <div className="border-r border-[var(--border)] px-4 py-3">
+                <div className="text-[11px] font-medium text-[var(--text-muted)]">Seats</div>
+                <div className="mt-1 num font-mono tabular-nums text-[20px] font-semibold tracking-[-0.02em] text-[var(--text-primary)]">{kpis.seats}</div>
+              </div>
+              <div className="border-r border-[var(--border)] px-4 py-3">
+                <div className="text-[11px] font-medium text-[var(--text-muted)]">Candidates</div>
+                <div className="mt-1 num font-mono tabular-nums text-[20px] font-semibold tracking-[-0.02em] text-[var(--text-primary)]">{kpis.cands}</div>
+              </div>
+              <div className="border-r border-[var(--border)] px-4 py-3">
+                <div className="text-[11px] font-medium text-[var(--text-muted)]">
+                  With declared cases
+                  {kpis.cands > 0 ? (
+                    <span className="ml-1 text-[var(--text-muted)]">· {Math.round((Number(kpis.crim) / Number(kpis.cands)) * 100)}% of cands</span>
+                  ) : null}
+                </div>
+                <div className="mt-1 num font-mono tabular-nums text-[20px] font-semibold tracking-[-0.02em] text-[var(--text-primary)]">{kpis.crim}</div>
+              </div>
+              <div className="px-4 py-3">
+                <div className="text-[11px] font-medium text-[var(--text-muted)]">Median assets · {assetsDb?.coveragePct != null ? `${assetsDb.coveragePct}% cov` : "—"}</div>
+                <div className="mt-1 num font-mono tabular-nums text-[20px] font-semibold tracking-[-0.02em] text-[var(--text-primary)]">
+                  {assetsDb?.median != null ? `₹${(Number(assetsDb.median) / 1e7).toFixed(Number(assetsDb.median) < 1e8 ? 1 : 0)}Cr` : "—"}
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
+        ) : null}
+        {activeState !== "ALL" ? (
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-4 py-3 shadow-sm">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[var(--text-muted)]">
+              <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--text-muted)]">Coverage</span>
+              <span>Party <span className="text-[var(--text-secondary)]">{kpis.coverage.party}</span></span>
+              <span>Age <span className="text-[var(--text-secondary)]">{kpis.coverage.age}</span></span>
+              <span>Gender <span className="text-[var(--text-secondary)]">{kpis.coverage.gender}</span></span>
+              <span>Assets <span className="text-[var(--text-secondary)]">{kpis.coverage.assets}</span></span>
+              <span>Cases <span className="text-[var(--text-secondary)]">{kpis.coverage.criminal_field}</span></span>
+              <span className="ml-auto">Scope · {activeState}</span>
+            </div>
+          </div>
+        ) : null}
 
         {activeState === "ALL" && allGlobalMetrics ? (
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-2 text-center">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-2.5 text-center shadow-sm">
               <div className="font-mono text-[10px] font-bold text-[var(--text-secondary)]">
                 {allGlobalMetrics.totalElectors != null ? Number(allGlobalMetrics.totalElectors).toLocaleString("en-IN") : "—"}
               </div>
               <div className="font-mono text-[8px] text-[var(--text-muted)]">TOTAL ELECTORS (2021)</div>
             </div>
-            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-2 text-center">
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-2.5 text-center shadow-sm">
               <div className="font-mono text-[10px] font-bold text-[var(--text-secondary)]">
                 {allGlobalMetrics.totalVotesPolled != null ? Number(allGlobalMetrics.totalVotesPolled).toLocaleString("en-IN") : "—"}
               </div>
               <div className="font-mono text-[8px] text-[var(--text-muted)]">VOTES POLLED (2021)</div>
             </div>
-            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-2 text-center">
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-2.5 text-center shadow-sm">
               <div className="font-mono text-[10px] font-bold text-[var(--text-secondary)]">
                 {allGlobalMetrics.turnoutWeighted != null ? `${Number(allGlobalMetrics.turnoutWeighted).toFixed(2)}%` : "—"}
               </div>
               <div className="font-mono text-[8px] text-[var(--text-muted)]">WEIGHTED TURNOUT (2021)</div>
             </div>
-            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-2 text-center">
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-2.5 text-center shadow-sm">
               <div className="font-mono text-[10px] font-bold text-[var(--text-secondary)]">
                 {allGlobalMetrics.closestMargin != null ? Number(allGlobalMetrics.closestMargin).toLocaleString("en-IN") : "—"}
               </div>
               <div className="font-mono text-[8px] text-[var(--text-muted)]">CLOSEST MARGIN (2021)</div>
             </div>
-            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-2 text-center">
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-2.5 text-center shadow-sm">
               <div className="font-mono text-[10px] font-bold text-[var(--text-secondary)]">
                 {Number(allGlobalMetrics.closeSeats5k || 0).toLocaleString("en-IN")}
               </div>
@@ -1207,10 +1471,19 @@ export default function InsightsCenterPane({
             const loadedStates = STATES.filter((s) => s !== "ALL" && allSeatShares[s]?.total)
             if (!loadedStates.length) return null
             return (
-              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+              <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:gap-6">
                 {loadedStates.map((s) => {
                   const ss = allSeatShares[s]!
-                  return <SeatShareArc key={s} totalSeats={ss.total} counts={ss.counts} title={`SEAT SHARE (2021) · ${s}`} colorMode={seatShareMode} />
+                  const SeatShareViz = ss.total < 80 ? SeatShareBar : SeatShareArc
+                  return (
+                    <SeatShareViz
+                      key={s}
+                      totalSeats={ss.total}
+                      counts={ss.counts}
+                      title={`SEAT SHARE (2021) · ${STATE_META[s]?.abbr || s}`}
+                      colorMode={seatShareMode}
+                    />
+                  )
                 })}
               </div>
             )
@@ -1218,9 +1491,10 @@ export default function InsightsCenterPane({
         ) : null}
 
         {activeState === "ALL" && allViewExtras ? (
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3">
-              <div className="font-mono text-[10px] font-bold tracking-wider text-[var(--text-secondary)]">CRIMINAL SHARE BY STATE</div>
+          <MobileCollapsible title="More state comparisons (2021)">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-5">
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 shadow-sm">
+              <div className="eb-eyebrow">CRIMINAL SHARE BY STATE</div>
               <p className="mt-1 font-mono text-[9px] text-[var(--text-muted)]">
                 Uses DB head-counts (fast). Declared criminal cases &gt; 0 among candidate filings.
               </p>
@@ -1231,9 +1505,9 @@ export default function InsightsCenterPane({
               </div>
             </div>
 
-            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3">
-              <div className="font-mono text-[10px] font-bold tracking-wider text-[var(--text-secondary)]">TOP ASSETS CANDIDATE BY STATE</div>
-              <p className="mt-1 font-mono text-[9px] text-[var(--text-muted)]">Best-effort, from DB `assets_value` (excludes zeros).</p>
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 shadow-sm">
+              <div className="eb-eyebrow">TOP ASSETS CANDIDATE BY STATE</div>
+              <p className="mt-1 text-[11px] text-[var(--text-muted)]">Highest declared assets among filed candidates. Candidates with zero or undeclared values are excluded.</p>
               <div className="mt-2 space-y-1.5">
                 {(topAssetsByState || []).length ? (
                   (() => {
@@ -1271,18 +1545,22 @@ export default function InsightsCenterPane({
               ) : null}
             </div>
 
-            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3">
-              <div className="font-mono text-[10px] font-bold tracking-wider text-[var(--text-secondary)]">TOP CLOSEST SEATS (2021)</div>
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 shadow-sm">
+              <div className="eb-eyebrow">CLOSEST SEATS (2021)</div>
               <p className="mt-1 font-mono text-[9px] text-[var(--text-muted)]">
-                Cross-state “where to look” list by smallest 2021 margin votes.
+                Where margins were thinnest — most likely to swing next election.
               </p>
               <div className="mt-2 overflow-hidden rounded border border-[var(--border)]">
                 <div className="max-h-[220px] overflow-auto">
                   {(() => {
+                    const constById = new Map(constituencies.map((c: any) => [String(c.id), c]))
                     const rows: any[] = []
                     for (const st of STATES.filter((s) => s !== "ALL")) {
                       const rs = (allResults2021?.[st] || []) as any[]
-                      for (const x of rs) if (x?.margin_votes != null) rows.push({ state: st, id: x.constituency_id, margin: Number(x.margin_votes) })
+                      for (const x of rs) if (x?.margin_votes != null) {
+                        const c = constById.get(String(x.constituency_id))
+                        rows.push({ state: st, id: x.constituency_id, name: c?.name || null, margin: Number(x.margin_votes) })
+                      }
                     }
                     rows.sort((a, b) => a.margin - b.margin)
                     if (!rows.length) return <div className="py-4 text-center font-mono text-[10px] text-[var(--text-muted)]">No result data loaded yet.</div>
@@ -1294,10 +1572,13 @@ export default function InsightsCenterPane({
                         className="flex w-full items-center justify-between gap-2 border-t border-[var(--border)] px-2 py-1.5 text-left hover:bg-[var(--surface-2)]"
                       >
                         <div className="min-w-0">
-                          <div className="font-mono text-[10px] font-bold text-[var(--text-secondary)] truncate">{String(r.id)}</div>
-                          <div className="mt-0.5 font-mono text-[8px] text-[var(--text-muted)]">{STATE_META[r.state]?.abbr || r.state}</div>
+                          <div className="font-mono text-[11px] font-semibold text-[var(--text-primary)] truncate">{r.name ?? String(r.id)}</div>
+                          <div className="mt-0.5 font-mono text-[9px] text-[var(--text-muted)]">{r.state}</div>
                         </div>
-                        <div className="shrink-0 font-mono text-[10px] font-bold text-[var(--text-secondary)]">{Number(r.margin).toLocaleString("en-IN")}</div>
+                        <div className="shrink-0 text-right">
+                          <div className="font-mono text-[11px] font-bold text-[var(--text-secondary)]">{Number(r.margin).toLocaleString("en-IN")}</div>
+                          <div className="font-mono text-[8px] text-[var(--text-muted)]">votes</div>
+                        </div>
                       </button>
                     ))
                   })()}
@@ -1305,8 +1586,8 @@ export default function InsightsCenterPane({
               </div>
             </div>
 
-            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3">
-              <div className="font-mono text-[10px] font-bold tracking-wider text-[var(--text-secondary)]">TIGHT SEATS BY STATE (2021)</div>
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 shadow-sm">
+              <div className="eb-eyebrow">TIGHT SEATS BY STATE (2021)</div>
               <p className="mt-1 font-mono text-[9px] text-[var(--text-muted)]">
                 Seats where the 2021 margin was under 5,000 votes. More tight seats = more volatile state.
               </p>
@@ -1326,7 +1607,7 @@ export default function InsightsCenterPane({
             </div>
 
             <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3">
-              <div className="font-mono text-[10px] font-bold tracking-wider text-[var(--text-secondary)]">WINNING PARTY AVG TURNOUT (2021)</div>
+              <div className="eb-eyebrow">WINNING PARTY AVG TURNOUT (2021)</div>
               <p className="mt-1 font-mono text-[9px] text-[var(--text-muted)]">
                 Average turnout % in seats won by each party (min 3 wins, cross-state).
               </p>
@@ -1358,15 +1639,27 @@ export default function InsightsCenterPane({
                   })()}
                 </div>
               </div>
+              
+            </div>
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 shadow-sm">
+            <div className="eb-eyebrow">
+              CANDIDATE AGE GROUPS (coverage-sensitive)
+            </div>
+            <div className="mt-2 space-y-1.5">
+              {ageBuckets.map((r) => (
+                <MiniBar key={r.bucket} label={r.bucket} value={r.count} max={maxAge} color="#16a34a" showPct total={ageBuckets.reduce((a,b)=>a+b.count,0)} />
+              ))}
             </div>
           </div>
+          </div>
+          </MobileCollapsible>
         ) : null}
 
         {activeState !== "ALL" ? (
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             {selectedSeatId && seatResult ? (
               <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3">
-                <div className="font-mono text-[10px] font-bold tracking-wider text-[var(--text-secondary)]">SEAT SNAPSHOT (2021)</div>
+                <div className="eb-eyebrow">SEAT SNAPSHOT (2021)</div>
                 <div className="mt-2 grid grid-cols-2 gap-2">
                   <div className="rounded border border-[var(--border)] bg-[var(--surface-2)] p-2">
                     <div className="font-mono text-[8px] text-[var(--text-muted)]">MARGIN</div>
@@ -1417,7 +1710,7 @@ export default function InsightsCenterPane({
                 </div>
 
                 <div className="mt-3 rounded border border-[var(--border)] bg-[var(--surface-2)] p-2">
-                  <div className="font-mono text-[9px] font-bold tracking-wider text-[var(--text-secondary)]">CONSTITUENCY INSIGHTS</div>
+                  <div className="eb-eyebrow">CONSTITUENCY INSIGHTS</div>
                   <div className="mt-2 grid grid-cols-2 gap-2">
                     <div className="rounded border border-[var(--border)] bg-[var(--surface-1)] p-2">
                       <div className="font-mono text-[8px] text-[var(--text-muted)]">WEALTH CONCENTRATION</div>
@@ -1450,15 +1743,20 @@ export default function InsightsCenterPane({
                 </div>
               </div>
             ) : seatShare?.total ? (
-              <SeatShareArc
-                totalSeats={seatShare.total}
-                counts={seatShare.counts}
-                title={`SEAT SHARE (2021 winners) · ${seatShareMode === "ALLIANCE" ? "ALLIANCE" : "PARTY"}`}
-                colorMode={seatShareMode}
-              />
+              (() => {
+                const SeatShareViz = seatShare.total < 80 ? SeatShareBar : SeatShareArc
+                return (
+                  <SeatShareViz
+                    totalSeats={seatShare.total}
+                    counts={seatShare.counts}
+                    title={`SEAT SHARE (2021 winners) · ${seatShareMode === "ALLIANCE" ? "ALLIANCE" : "PARTY"}`}
+                    colorMode={seatShareMode}
+                  />
+                )
+              })()
             ) : (
               <div className="flex h-[170px] flex-col items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 text-center">
-                <div className="font-mono text-[10px] font-bold tracking-wider text-[var(--text-secondary)]">SEAT SHARE (2021)</div>
+                <div className="eb-eyebrow">SEAT SHARE (2021)</div>
                 <div className="mt-2 font-mono text-[10px] text-[var(--text-muted)]">No results loaded.</div>
               </div>
             )}
@@ -1542,12 +1840,14 @@ export default function InsightsCenterPane({
                       </div>
                     </div>
                   ) : selectedSeatId ? (
-                    <div className="rounded border border-dashed border-[var(--border)] bg-[var(--surface-2)] p-3 font-mono text-[10px] text-[var(--text-muted)]">
-                      No seat-level elector gender row for <span className="font-bold text-[var(--text-secondary)]">{String(selectedSeatId)}</span> yet.
-                      <div className="mt-1">
-                        Add more constituency summary CSV “index cards” into <span className="font-bold text-[var(--text-secondary)]">osint_workers/historical_data</span> and rerun{" "}
-                        <span className="font-bold text-[var(--text-secondary)]">python osint_workers/eci_constituency_summary_ingestor.py --year 2021</span>.
-                      </div>
+                    <div className="rounded border border-dashed border-[var(--border)] bg-[var(--surface-2)] p-3 font-sans text-[12px] leading-relaxed text-[var(--text-muted)] md:font-mono md:text-[10px]">
+                      We’re still verifying 2021 elector gender numbers for this seat.
+                      {SHOW_DEV_HINTS ? (
+                        <div className="mt-1">
+                          Add more constituency summary CSV “index cards” into <span className="font-bold text-[var(--text-secondary)]">osint_workers/historical_data</span> and rerun{" "}
+                          <span className="font-bold text-[var(--text-secondary)]">python osint_workers/eci_constituency_summary_ingestor.py --year 2021</span>.
+                        </div>
+                      ) : null}
                     </div>
                   ) : Array.isArray(stateElectorsSummary) && stateElectorsSummary.length ? (
                     <div className="overflow-hidden rounded border border-[var(--border)] bg-[var(--surface-2)]">
@@ -1573,8 +1873,10 @@ export default function InsightsCenterPane({
                       })}
                     </div>
                   ) : (
-                    <div className="rounded border border-dashed border-[var(--border)] bg-[var(--surface-2)] p-3 font-mono text-[10px] text-[var(--text-muted)]">
-                      No elector gender summary loaded yet. Run `python eci_electors_summary_ingestor.py` (state-level) and `python eci_constituency_summary_ingestor.py` (seat-level).
+                    <div className="rounded border border-dashed border-[var(--border)] bg-[var(--surface-2)] p-3 font-sans text-[12px] leading-relaxed text-[var(--text-muted)] md:font-mono md:text-[10px]">
+                      {SHOW_DEV_HINTS
+                        ? "No elector gender summary loaded yet. Run `python eci_electors_summary_ingestor.py` (state-level) and `python eci_constituency_summary_ingestor.py` (seat-level)."
+                        : "Elector gender numbers are being verified for this state."}
                     </div>
                   )}
                 </div>
@@ -1620,22 +1922,47 @@ export default function InsightsCenterPane({
                     ) : (
                       <div className="h-8 w-8 rounded border border-[var(--border)] bg-[var(--surface-1)]" />
                     )}
-                    <div className="min-w-0">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (selectedSeatWinnerCand?.id) window.dispatchEvent(new CustomEvent("openCandidateDossier", { detail: { candidateId: String(selectedSeatWinnerCand.id) } }))
-                          onSelectConstituency(String(selectedSeatId))
-                        }}
-                        className="w-full text-left font-mono text-[11px] font-bold text-[#0ea5e9] hover:text-[#0ea5e9]/80 truncate"
-                      >
-                        {seatResult.winner_name}
-                      </button>
+                    <div className="min-w-0 flex-1">
+                      {inSeatWinnerCand?.id ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            window.dispatchEvent(new CustomEvent("openCandidateDossier", { detail: { candidateId: String(inSeatWinnerCand.id) } }))
+                          }}
+                          className="w-full text-left font-mono text-[11px] font-bold text-[#0ea5e9] hover:text-[#0ea5e9]/80 truncate"
+                          title="Open 2026 dossier for this candidate"
+                        >
+                          {seatResult.winner_name}
+                        </button>
+                      ) : (
+                        <div className="w-full font-mono text-[11px] font-bold text-[var(--text-secondary)] truncate">
+                          {seatResult.winner_name}
+                        </div>
+                      )}
                       <div className="mt-0.5 font-mono text-[9px] text-[var(--text-muted)] truncate">
                         {(seatResult.winner_party || "—") + (seatResult.winner_votes != null ? ` · ${Number(seatResult.winner_votes).toLocaleString("en-IN")} votes` : "")}
                       </div>
                     </div>
                   </div>
+                  {movedWinner ? (
+                    <div className="mt-1 flex items-center justify-between gap-2">
+                      <span className="min-w-0 truncate font-mono text-[9px] text-[var(--text-muted)]">
+                        Now contesting:{" "}
+                        <span className="font-bold text-[var(--text-secondary)]">
+                          {constNameById.get(String(movedWinner.constituency_id)) || movedWinner.constituency_id}
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          window.dispatchEvent(new CustomEvent("openCandidateDossier", { detail: { candidateId: String(movedWinner.id) } }))
+                        }}
+                        className="shrink-0 rounded border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 font-mono text-[9px] font-bold text-[#0ea5e9] hover:bg-sky-500/15"
+                      >
+                        Open 2026 profile
+                      </button>
+                    </div>
+                  ) : null}
                   <div className="mt-1 font-mono text-[9px] text-[var(--text-muted)]">
                     {seatResult.total_electors != null ? `Electors (2021): ${Number(seatResult.total_electors).toLocaleString("en-IN")}` : null}
                   </div>
@@ -1653,22 +1980,47 @@ export default function InsightsCenterPane({
                     ) : (
                       <div className="h-8 w-8 rounded border border-[var(--border)] bg-[var(--surface-1)]" />
                     )}
-                    <div className="min-w-0">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (selectedSeatRunnerCand?.id) window.dispatchEvent(new CustomEvent("openCandidateDossier", { detail: { candidateId: String(selectedSeatRunnerCand.id) } }))
-                          onSelectConstituency(String(selectedSeatId))
-                        }}
-                        className="w-full text-left font-mono text-[11px] font-bold text-[#0ea5e9] hover:text-[#0ea5e9]/80 truncate"
-                      >
-                        {seatResult.runner_up_name || "—"}
-                      </button>
+                    <div className="min-w-0 flex-1">
+                      {inSeatRunnerCand?.id ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            window.dispatchEvent(new CustomEvent("openCandidateDossier", { detail: { candidateId: String(inSeatRunnerCand.id) } }))
+                          }}
+                          className="w-full text-left font-mono text-[11px] font-bold text-[#0ea5e9] hover:text-[#0ea5e9]/80 truncate"
+                          title="Open 2026 dossier for this candidate"
+                        >
+                          {seatResult.runner_up_name || "—"}
+                        </button>
+                      ) : (
+                        <div className="w-full font-mono text-[11px] font-bold text-[var(--text-secondary)] truncate">
+                          {seatResult.runner_up_name || "—"}
+                        </div>
+                      )}
                       <div className="mt-0.5 font-mono text-[9px] text-[var(--text-muted)] truncate">
                         {(seatResult.runner_up_party || "—") + (seatResult.runner_up_votes != null ? ` · ${Number(seatResult.runner_up_votes).toLocaleString("en-IN")} votes` : "")}
                       </div>
                     </div>
                   </div>
+                  {movedRunner ? (
+                    <div className="mt-1 flex items-center justify-between gap-2">
+                      <span className="min-w-0 truncate font-mono text-[9px] text-[var(--text-muted)]">
+                        Now contesting:{" "}
+                        <span className="font-bold text-[var(--text-secondary)]">
+                          {constNameById.get(String(movedRunner.constituency_id)) || movedRunner.constituency_id}
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          window.dispatchEvent(new CustomEvent("openCandidateDossier", { detail: { candidateId: String(movedRunner.id) } }))
+                        }}
+                        className="shrink-0 rounded border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 font-mono text-[9px] font-bold text-[#0ea5e9] hover:bg-sky-500/15"
+                      >
+                        Open 2026 profile
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="col-span-2 rounded border border-[var(--border)] bg-[var(--surface-2)] p-2">
                   <div className="flex items-center justify-between gap-4">
@@ -1709,8 +2061,10 @@ export default function InsightsCenterPane({
                 ) : null}
               </div>
             ) : (
-              <div className="mt-2 rounded border border-dashed border-[var(--border)] bg-[var(--surface-2)] p-3 text-center font-mono text-[10px] text-[var(--text-muted)]">
-                No 2021 result ingested for this seat yet. Run `history_ingestor_2021.py` and ensure `constituency_results` exists.
+              <div className="mt-2 rounded border border-dashed border-[var(--border)] bg-[var(--surface-2)] p-3 text-center font-sans text-[12px] leading-relaxed text-[var(--text-muted)] md:font-mono md:text-[10px]">
+                {SHOW_DEV_HINTS
+                  ? "No 2021 result ingested for this seat yet. Run `history_ingestor_2021.py` and ensure `constituency_results` exists."
+                  : "We’re still verifying 2021 results for this seat."}
               </div>
             )}
           </div>
@@ -1720,7 +2074,7 @@ export default function InsightsCenterPane({
           <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3">
             <div className="flex items-center justify-between gap-2">
               <div>
-                <div className="font-mono text-[10px] font-bold tracking-wider text-[var(--text-secondary)]">COMPETITIVE SEATS (closest margins, 2021)</div>
+                <div className="eb-eyebrow">COMPETITIVE SEATS (closest margins, 2021)</div>
                 <div className="mt-1 font-mono text-[9px] text-[var(--text-muted)]">
                   This is the highest-signal “where to look” list you can build from historical results.
                 </div>
@@ -1768,7 +2122,7 @@ export default function InsightsCenterPane({
           <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3">
             <div className="flex items-center justify-between gap-2">
               <div>
-                <div className="font-mono text-[10px] font-bold tracking-wider text-[var(--text-secondary)]">TOP RICHEST CANDIDATES (assets)</div>
+                <div className="eb-eyebrow">TOP RICHEST CANDIDATES (assets)</div>
                 <div className="mt-1 font-mono text-[9px] text-[var(--text-muted)]">From DB filings. Best-effort; excludes zeros.</div>
               </div>
               <div className="font-mono text-[9px] text-[var(--text-muted)]">{stateTopAssets?.length ? "top 10" : "—"}</div>
@@ -1800,38 +2154,41 @@ export default function InsightsCenterPane({
           </div>
         ) : null}
 
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3">
-            <div className="font-mono text-[10px] font-bold tracking-wider text-[var(--text-secondary)]">
-              CANDIDATE FILINGS BY PARTY (top 10)
+        {activeState === "ALL" && kpis.cands === 0 ? (
+          <div className="border-b border-[var(--border)] bg-[var(--surface-1)] px-4 py-10 text-center md:px-8">
+            <p className="text-[14px] font-semibold text-[var(--text-primary)]">
+              {overviewCandidateHeadcount > 0 ? "Loading candidate roster…" : "No candidate filings in scope yet"}
+            </p>
+            <p className="mx-auto mt-2 max-w-md text-[13px] leading-relaxed text-[var(--text-muted)]">
+              {overviewCandidateHeadcount > 0
+                ? "Party, age, and gender charts use full candidate rows for every state. They fill in automatically once downloads finish (first open can take a few seconds)."
+                : "Charts will populate when candidate data is available for constituencies in this workspace."}
+            </p>
+          </div>
+        ) : (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-5">
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 shadow-sm">
+            <div className="eb-eyebrow">
+              Parties in our dataset · top 10
             </div>
-            <p className="mt-1 font-mono text-[9px] text-[var(--text-muted)]">
-              Not seat share. This is just “how many candidates we have in the dataset” — coverage-sensitive.
+            <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+              Number of candidate filings we hold per party, in the current scope. Not seat share.
             </p>
             <div className="mt-2 space-y-1.5">
               {candidatesByParty.length === 0 ? (
                 <div className="py-6 text-center font-mono text-[10px] text-[var(--text-muted)]">No candidates loaded in scope.</div>
               ) : (
                 candidatesByParty.map((r) => (
-                  <MiniBar key={r.party} label={r.party} value={r.count} max={maxParty} color="#0ea5e9" />
+                  <MiniBar key={r.party} label={r.party} value={r.count} max={maxParty} color="#0ea5e9" showPct total={candidatesByParty.reduce((a,b)=>a+b.count,0)} />
                 ))
               )}
             </div>
           </div>
 
-          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3">
-            <div className="font-mono text-[10px] font-bold tracking-wider text-[var(--text-secondary)]">
-              CANDIDATE AGE GROUPS (coverage-sensitive)
-            </div>
-            <div className="mt-2 space-y-1.5">
-              {ageBuckets.map((r) => (
-                <MiniBar key={r.bucket} label={r.bucket} value={r.count} max={maxAge} color="#16a34a" />
-              ))}
-            </div>
-          </div>
 
-          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3">
-            <div className="font-mono text-[10px] font-bold tracking-wider text-[var(--text-secondary)]">
+
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 shadow-sm">
+            <div className="eb-eyebrow">
               CANDIDATE GENDER (coverage-sensitive)
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-2 font-mono text-[9px] text-[var(--text-muted)]">
@@ -1848,7 +2205,7 @@ export default function InsightsCenterPane({
             </div>
             <div className="mt-2 space-y-1.5">
               {genderBuckets.map((r) => (
-                <MiniBar key={r.gender} label={r.gender} value={r.count} max={maxGender} color="#8b5cf6" />
+                <MiniBar key={r.gender} label={r.gender} value={r.count} max={maxGender} color="#8b5cf6" showPct total={genderBuckets.reduce((a,b)=>a+b.count,0)} />
               ))}
             </div>
 
@@ -1914,7 +2271,7 @@ export default function InsightsCenterPane({
 
           {!selectedSeatId && activeState !== "ALL" ? (
             <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3">
-              <div className="font-mono text-[10px] font-bold tracking-wider text-[var(--text-secondary)]">
+              <div className="eb-eyebrow">
                 CONSTITUENCIES
               </div>
               <p className="mt-1 font-mono text-[9px] text-[var(--text-muted)]">
@@ -1950,7 +2307,7 @@ export default function InsightsCenterPane({
           ) : selectedSeatId ? (
             <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 space-y-2">
               <div className="flex items-center justify-between">
-                <div className="font-mono text-[10px] font-bold tracking-wider text-[var(--text-secondary)]">SEAT SUMMARY</div>
+                <div className="eb-eyebrow">SEAT SUMMARY</div>
                 {selectedSeat?.phase ? (
                   <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 font-mono text-[8px] text-[var(--text-muted)]">
                     Phase {selectedSeat.phase}
@@ -2017,8 +2374,11 @@ export default function InsightsCenterPane({
             </div>
           ) : null}
         </div>
+        )}
 
         {/* District-level UI intentionally removed per requirement (constituency-only). */}
+        </div>
+      </div>
       </div>
     </div>
   )

@@ -298,13 +298,37 @@ def main() -> None:
     p.add_argument("--year", type=int, default=2021)
     p.add_argument("--path", help="Path to a single XLSX to ingest", required=False)
     p.add_argument("--dir", help="Directory of XLSX (default: osint_workers/historical_data)", default=str(Path(__file__).resolve().parent / "historical_data"))
+    p.add_argument(
+        "--all-xlsx",
+        action="store_true",
+        help=(
+            "Process every .xlsx in --dir (unsafe). "
+            "By default we only process files that look like ECI 'Detailed Results' sheets."
+        ),
+    )
     p.add_argument("--dry-run", action="store_true")
     args = p.parse_args()
 
     if args.path:
         files = [Path(args.path)]
     else:
-        files = sorted(Path(args.dir).glob("*.xlsx"))
+        all_files = sorted(Path(args.dir).glob("*.xlsx"))
+        if args.all_xlsx:
+            files = all_files
+        else:
+            # Avoid accidental ingestion of unrelated XLSX in the same folder
+            # (e.g. "Electors Data Summary", "Constituency Data Summary", etc.)
+            def _looks_like_detailed_results(name: str) -> bool:
+                n = (name or "").lower().strip()
+                if not n.endswith(".xlsx"):
+                    return False
+                if "detailed" in n and "result" in n:
+                    return True
+                if n.startswith("10-") and "result" in n:
+                    return True
+                return False
+
+            files = [f for f in all_files if _looks_like_detailed_results(f.name)]
     if not files:
         raise RuntimeError(f"no_xlsx_found: dir={args.dir}")
 
@@ -323,9 +347,13 @@ def main() -> None:
         if not state:
             raise RuntimeError(f"cannot_infer_state: pass --state for {path.name}")
         print(f"[eci_xlsx] ingest state={state} year={args.year} xlsx={path.name} dry_run={args.dry_run}", flush=True)
-        r = ingest_xlsx(path=path, state=state, year=args.year, dry_run=args.dry_run)
-        out.append(r)
-        print(f"[eci_xlsx] {state}: upserted={r['upserted']} unmatched={r['unmatched']}", flush=True)
+        try:
+            r = ingest_xlsx(path=path, state=state, year=args.year, dry_run=args.dry_run)
+            out.append(r)
+            print(f"[eci_xlsx] {state}: upserted={r['upserted']} unmatched={r['unmatched']}", flush=True)
+        except Exception as e:
+            # Keep the batch run resilient when the folder contains mixed XLSX.
+            print(f"[eci_xlsx] SKIP file={path.name} error={e}", flush=True)
 
     print(f"[eci_xlsx] DONE files={len(out)}", flush=True)
 

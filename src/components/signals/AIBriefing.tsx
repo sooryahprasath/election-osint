@@ -56,7 +56,9 @@ export default function AIBriefing({ onMeta }: { onMeta?: (m: AIBriefingMeta) =>
   useEffect(() => {
     if (!onMeta) return;
     if (loading || !briefing) return;
-    const title = `${String(briefing.time_of_day || "LATEST").toUpperCase()} AI BRIEF`;
+    const tod = String(briefing.time_of_day || "Latest").trim();
+    const prettyTod = tod ? tod.charAt(0).toUpperCase() + tod.slice(1).toLowerCase() : "Latest";
+    const title = `${prettyTod} brief`;
     const dateLabel = new Date(briefing.created_at).toLocaleDateString("en-IN", {
       day: "2-digit",
       month: "short",
@@ -69,18 +71,18 @@ export default function AIBriefing({ onMeta }: { onMeta?: (m: AIBriefingMeta) =>
 
   if (loading) {
     return (
-      <div className="px-3 py-6 flex flex-col items-center justify-center text-[var(--text-muted)]">
-        <Loader2 className="h-5 w-5 animate-spin mb-2 text-[#16a34a]" />
-        <span className="font-mono text-[9px]">AWAITING AI SYNC...</span>
+      <div className="px-4 py-6 flex flex-col items-center justify-center text-[var(--text-muted)]">
+        <Loader2 className="h-4 w-4 animate-spin mb-2 text-[var(--brand)]" />
+        <span className="text-[12px]">Loading today&apos;s briefing…</span>
       </div>
     );
   }
 
   if (!briefing) {
     return (
-      <div className="px-3 py-4 text-center text-[var(--text-muted)] font-mono text-[10px]">
-        <ShieldAlert className="h-4 w-4 mx-auto mb-1 opacity-50" />
-        No AI briefing available yet.
+      <div className="mx-4 my-3 rounded-[var(--radius)] border border-dashed border-[color:var(--border)] bg-[var(--surface-2)] p-4 text-center text-[var(--text-muted)] text-[12px]">
+        <ShieldAlert className="h-4 w-4 mx-auto mb-1.5 opacity-60" />
+        No briefing for today yet. We post a fresh one every morning.
       </div>
     );
   }
@@ -89,40 +91,42 @@ export default function AIBriefing({ onMeta }: { onMeta?: (m: AIBriefingMeta) =>
   const confidence = Number(briefing.confidence_score || 3);
 
   return (
-    <div className="px-3 pb-3 pt-2">
-      <div className="overflow-hidden rounded-xl border border-[color:var(--border)] bg-[var(--surface-1)] shadow-sm dark:shadow-black/25">
+    <div className="px-4 pb-3 pt-1">
+      <div className="overflow-hidden rounded-[var(--radius)] border border-[color:var(--border)] bg-[var(--surface-1)]">
         {(briefing.paragraphs || []).map((para: any, idx: number) => (
           <div
             key={idx}
-            className={`flex items-start gap-2.5 px-3 py-2.5 ${
-              idx > 0 ? "border-t border-[color:var(--border)]/75" : ""
+            className={`flex items-start gap-2.5 px-3 py-3 ${
+              idx > 0 ? "border-t border-[color:var(--border)]" : ""
             }`}
           >
             <span
-              className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
-              style={{ backgroundColor: para.color_hex || "#16a34a" }}
+              className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full"
+              style={{ backgroundColor: para.color_hex || "var(--brand)" }}
               aria-hidden="true"
             />
             <div className="min-w-0">
-              <div className="text-[12px] font-semibold leading-snug text-[var(--text-primary)]">
+              <div className="text-[12.5px] font-semibold leading-snug text-[var(--text-primary)]">
                 {String(para.heading || "").replace(/:$/, "")}
               </div>
-              <div className="mt-1 text-[11px] leading-snug text-[var(--text-secondary)]">{para.body}</div>
+              <div className="mt-1 text-[12px] leading-snug text-[var(--text-secondary)]">{para.body}</div>
             </div>
           </div>
         ))}
       </div>
 
-      <div className="mt-3 flex items-center justify-between border-t border-[color:var(--border)] pt-2">
+      <div className="mt-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="font-mono text-[9px] text-[var(--text-muted)]">AI RELIABILITY</span>
-          <div className="flex gap-0.5">
+          <span className="text-[11px] text-[var(--text-muted)]">Confidence</span>
+          <div className="flex gap-0.5" aria-label={`Confidence ${confidence} of 5`}>
             {[1, 2, 3, 4, 5].map((i) => (
-              <div key={i} className={`h-1.5 w-3 rounded-sm ${i <= confidence ? "bg-[#16a34a]" : "bg-[var(--surface-3)]"}`} />
+              <div key={i} className={`h-1.5 w-3 rounded-[2px] ${i <= confidence ? "bg-[var(--brand)]" : "bg-[var(--surface-3)]"}`} />
             ))}
           </div>
         </div>
-        <span className="font-mono text-[8px] text-[var(--text-muted)] text-right">BASED ON {sourcesCount} SOURCES</span>
+        <span className="text-[11px] text-[var(--text-muted)] text-right">
+          <span className="num font-mono tabular-nums">{sourcesCount}</span> sources
+        </span>
       </div>
     </div>
   );

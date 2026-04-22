@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Play, ExternalLink, Search, CheckCircle2 } from "lucide-react";
+import { Play, ExternalLink, Search, CheckCircle2, Video } from "lucide-react";
 import { useLiveData } from "@/lib/context/LiveDataContext";
 import { relativeTime } from "@/lib/utils/formatting";
 import { excludeFromIntelligenceFeed } from "@/lib/utils/signalClassifier";
@@ -101,8 +101,21 @@ export default function VideosCenterPane({
           ) : null}
         </div>
         {videos.length === 0 ? (
-          <div className="p-6 text-center font-mono text-[10px] text-[var(--text-muted)]">
-            No videos found for this scope yet.
+          <div className="flex flex-col items-center justify-center gap-4 py-16 text-center px-6">
+            <div className="rounded-full border border-[var(--border)] bg-[var(--surface-2)] p-4">
+              <Video className="h-7 w-7 text-[#0ea5e9] opacity-60" />
+            </div>
+            <div>
+              <p className="font-mono text-[13px] font-semibold text-[var(--text-primary)]">No videos yet</p>
+              <p className="mt-1 font-mono text-[11px] text-[var(--text-muted)] max-w-xs mx-auto leading-relaxed">
+                Campaign speeches, press conferences, and TV debates are collected here from YouTube and news channels as they are published.
+              </p>
+            </div>
+            <div className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-4 py-2">
+              <p className="font-mono text-[10px] text-[var(--text-muted)]">
+                Videos stream in <span className="text-[var(--text-secondary)] font-semibold">automatically once campaign begins</span>
+              </p>
+            </div>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-2 p-3 md:grid-cols-2 xl:grid-cols-3">

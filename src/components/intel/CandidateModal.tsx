@@ -95,6 +95,14 @@ export default function CandidateModal({
     .filter((s: any) => s.constituency_id === candidate.constituency_id)
     .slice(0, 5);
 
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const jumpTo = (id: string) => {
+    const root = scrollRef.current;
+    if (!root) return;
+    const el = root.querySelector(`#${id}`) as HTMLElement | null;
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   const modalContent = (
     <div
       className="fixed inset-0 z-[9999] flex items-end justify-center sm:items-center p-0 sm:p-4 bg-black/55 backdrop-blur-md animate-fade-in-up"
@@ -102,7 +110,10 @@ export default function CandidateModal({
       aria-modal="true"
       aria-labelledby="dossier-title"
     >
-      <div className="flex max-h-[100dvh] sm:max-h-[95vh] w-full sm:max-w-5xl flex-col overflow-hidden rounded-t-2xl border border-[color:var(--border)] bg-[var(--surface-1)] shadow-2xl sm:rounded-xl">
+      <div
+        className="flex max-h-[100dvh] sm:max-h-[95vh] w-full sm:max-w-5xl flex-col overflow-hidden rounded-t-2xl border border-[color:var(--border)] bg-[var(--surface-1)] shadow-2xl sm:rounded-xl"
+        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+      >
         {/* Header — mobile: taller tap target; desktop: compact strip */}
         <div
           className="shrink-0 border-b border-[color:var(--border)] bg-[var(--surface-2)] px-4 py-3 sm:py-3.5"
@@ -170,29 +181,54 @@ export default function CandidateModal({
             <button
               type="button"
               onClick={onClose}
-              className="shrink-0 rounded-lg p-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-3)] hover:text-[var(--text-primary)]"
+              className="hit-44 shrink-0 rounded-lg p-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-3)] hover:text-[var(--text-primary)]"
               aria-label="Close dossier"
             >
-              <X className="h-5 w-5" />
+              <X className="h-6 w-6" />
             </button>
           </div>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
+        <nav
+          className="sm:hidden flex shrink-0 items-center gap-1 border-b border-[color:var(--border)] bg-[var(--surface-1)] px-2 py-1 overflow-x-auto no-scrollbar"
+          aria-label="Dossier sections"
+        >
+          {[
+            { id: "sec-overview", label: "Overview" },
+            { id: "sec-facts", label: "Assets & cases" },
+            ...(background ? [{ id: "sec-background", label: "Background" }] : []),
+            { id: "sec-signals", label: "Signals" },
+          ].map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => jumpTo(t.id)}
+              className="hit-44 shrink-0 rounded-md px-3 py-2 font-sans text-[13px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+            >
+              {t.label}
+            </button>
+          ))}
+        </nav>
+
+        <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain scroll-smooth">
           {/* Mobile: single column stack. Desktop: photo + main grid */}
           <div className="flex flex-col gap-4 p-4 lg:flex-row lg:gap-6 lg:p-6">
             {/* Photo + sources */}
-            <div className="flex w-full flex-col gap-3 lg:w-[220px] lg:shrink-0 xl:w-[240px]">
-              <div className="mx-auto aspect-[3/4] w-full max-w-[200px] overflow-hidden rounded-xl border border-[color:var(--border)] bg-[var(--surface-2)] shadow-inner lg:mx-0 lg:max-w-none">
+            <div id="sec-overview" className="flex w-full flex-col gap-3 lg:w-[220px] lg:shrink-0 xl:w-[240px]">
+              <div className="mx-auto aspect-[3/4] w-full max-w-[200px] overflow-hidden rounded-xl border border-[color:var(--border)] bg-[var(--surface-2)] shadow-inner lg:mx-0 lg:max-w-none relative">
                 {candidate.photo_url && !imgError ? (
-                  <img
-                    src={candidate.photo_url}
-                    alt=""
-                    loading="lazy"
-                    decoding="async"
-                    className="h-full w-full object-cover"
-                    onError={() => setImgError(true)}
-                  />
+                  <>
+                    <img
+                      src={candidate.photo_url}
+                      alt=""
+                      loading="lazy"
+                      decoding="async"
+                      className="h-full w-full object-cover object-top"
+                      onError={() => setImgError(true)}
+                    />
+                    {/* Subtle gradient to soften white-bg passport photos in dark mode */}
+                    <div className="absolute inset-0 pointer-events-none dark:bg-gradient-to-b dark:from-transparent dark:via-transparent dark:to-[var(--surface-2)]/30 rounded-xl" />
+                  </>
                 ) : (
                   <div className="flex h-full items-center justify-center">
                     <User className="h-16 w-16 text-[var(--text-muted)] opacity-60" />
@@ -232,27 +268,24 @@ export default function CandidateModal({
                 )}
               </div>
 
-              <div className="rounded-lg border border-[color:var(--border)] bg-[var(--surface-2)] p-3 font-mono text-[9px] text-[var(--text-secondary)]">
-                <p className="mb-1 font-bold uppercase tracking-wider text-[var(--text-muted)]">Record IDs</p>
-                <p className="break-all">
-                  <span className="text-[var(--text-muted)]">Candidate:</span> {candidate.id}
-                </p>
-                {candidate.myneta_candidate_id && (
-                  <p className="break-all">
-                    <span className="text-[var(--text-muted)]">MyNeta ID:</span> {candidate.myneta_candidate_id}
-                  </p>
-                )}
-                {candidate.constituency_id && (
-                  <p className="break-all">
-                    <span className="text-[var(--text-muted)]">Seat ID:</span> {candidate.constituency_id}
-                  </p>
-                )}
-              </div>
+              {/* Record IDs — dev/debug only, hidden from regular users */}
+              {process.env.NEXT_PUBLIC_SHOW_DEV_HINTS === "true" && (
+                <div className="rounded-lg border border-[color:var(--border)] bg-[var(--surface-2)] p-3 font-mono text-[9px] text-[var(--text-secondary)]">
+                  <p className="mb-1 font-bold uppercase tracking-wider text-[var(--text-muted)]">Record IDs</p>
+                  <p className="break-all"><span className="text-[var(--text-muted)]">Candidate:</span> {candidate.id}</p>
+                  {candidate.myneta_candidate_id && (
+                    <p className="break-all"><span className="text-[var(--text-muted)]">MyNeta ID:</span> {candidate.myneta_candidate_id}</p>
+                  )}
+                  {candidate.constituency_id && (
+                    <p className="break-all"><span className="text-[var(--text-muted)]">Seat ID:</span> {candidate.constituency_id}</p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Main facts */}
             <div className="min-w-0 flex-1 space-y-4">
-              <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-3">
+              <div id="sec-facts" className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-3">
                 <StatCard
                   icon={<User className="h-3.5 w-3.5" />}
                   label="Age / Gender"
@@ -351,7 +384,7 @@ export default function CandidateModal({
               </div>
 
               {background ? (
-                <div className="rounded-xl border border-[color:var(--border)] bg-[var(--surface-1)] p-4">
+                <div id="sec-background" className="rounded-xl border border-[color:var(--border)] bg-[var(--surface-1)] p-4">
                   <h3 className="mb-2 font-mono text-[10px] font-bold uppercase tracking-wider text-[var(--text-secondary)]">
                     Background
                   </h3>
@@ -359,7 +392,7 @@ export default function CandidateModal({
                 </div>
               ) : null}
 
-              <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 p-4">
+              <div id="sec-signals" className="rounded-xl border border-amber-500/25 bg-amber-500/10 p-4">
                 <h3 className="mb-2 flex items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-wider text-amber-200">
                   <Search className="h-3.5 w-3.5" />
                   Constituency signals

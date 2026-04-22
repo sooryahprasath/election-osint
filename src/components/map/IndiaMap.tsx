@@ -38,9 +38,32 @@ const PARTY_COLORS: Record<string, string> = {
   "DMK": "#ef4444", "AIADMK": "#22c55e", "IND": "#71717a"
 };
 
-const THEME = {
+const THEME_LIGHT = {
   districtFill: "#f1f5f9",
-  districtStroke: "#64748b",
+  districtStroke: "#94a3b8",
+  indiaFill: "#ffffff",
+  indiaStroke: "#94a3b8",
+  labelFill: "#3f3f46",
+  labelStroke: "#ffffff",
+  clusterLabel: "#1e293b",
+  clusterLabelStroke: "#ffffff",
+  clusterSub: "#64748b",
+  mapBg: "var(--surface-3)",
+  dotPattern: "rgba(148,163,184,0.16)",
+};
+
+const THEME_DARK = {
+  districtFill: "#1b2635",
+  districtStroke: "#2b3a4d",
+  indiaFill: "#131c27",
+  indiaStroke: "#2b3a4d",
+  labelFill: "#94a3b8",
+  labelStroke: "#0b0f14",
+  clusterLabel: "#cbd5e1",
+  clusterLabelStroke: "#0b0f14",
+  clusterSub: "#64748b",
+  mapBg: "var(--surface-0)",
+  dotPattern: "rgba(255,255,255,0.04)",
 };
 
 /** Hex #RRGGBB + alpha suffix for SVG fill (8-digit hex). */
@@ -120,6 +143,17 @@ export default function IndiaMap({
   mobilePane = "map",
 }: IndiaMapProps) {
   const { constituencies, signals, operationMode, liveResults } = useLiveData();
+
+  // Detect dark mode via html.dark class — re-checks on any class change
+  const [isDark, setIsDark] = useState(false);
+  useEffect(() => {
+    const check = () => setIsDark(document.documentElement.classList.contains("dark"));
+    check();
+    const obs = new MutationObserver(check);
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => obs.disconnect();
+  }, []);
+  const MAP_THEME = isDark ? THEME_DARK : THEME_LIGHT;
 
   const shellRef = useRef<HTMLDivElement>(null);
   const [shellSize, setShellSize] = useState<{ w: number; h: number }>({ w: 800, h: 700 });
@@ -486,8 +520,8 @@ export default function IndiaMap({
       <div
         className="relative min-h-0 w-full flex-1 overflow-hidden"
         style={{
-          backgroundColor: "var(--surface-3)",
-          backgroundImage: "radial-gradient(rgba(148,163,184,0.16) 1px, transparent 1px)",
+          backgroundColor: MAP_THEME.mapBg,
+          backgroundImage: `radial-gradient(${MAP_THEME.dotPattern} 1px, transparent 1px)`,
           backgroundSize: "20px 20px",
         }}
       >
@@ -586,7 +620,7 @@ export default function IndiaMap({
           projection={projectionConfig as any}
           width={shellSize.w}
           height={shellSize.h}
-          style={{ width: "100%", height: "100%", display: "block", outline: "none" }}
+          style={{ width: "100%", height: "100%", display: "block", outline: "none", backgroundColor: MAP_THEME.mapBg }}
         >
           <ZoomableGroup
             zoom={position.zoom}
@@ -626,8 +660,8 @@ export default function IndiaMap({
                   const isTargetState = ELECTION_STATES.includes(stateName);
                   const metaColor = STATE_META[stateName]?.color || "#16a34a";
 
-                  let fill = "#ffffff";
-                  let stroke = "#64748b";
+                  let fill = MAP_THEME.indiaFill;
+                  let stroke = MAP_THEME.indiaStroke;
                   let strokeWidth = 0.65 / zoomFactor;
 
                   const isStateView = currentView !== "India";
@@ -638,8 +672,8 @@ export default function IndiaMap({
                       strokeWidth = 1.05 / zoomFactor;
                     }
                   } else {
-                    fill = THEME.districtFill;
-                    stroke = THEME.districtStroke;
+                    fill = MAP_THEME.districtFill;
+                    stroke = MAP_THEME.districtStroke;
                     strokeWidth = 0.45 / zoomFactor;
                   }
                   let centroid: [number, number] | null = null;
@@ -782,9 +816,9 @@ export default function IndiaMap({
                           fontFamily: "monospace",
                           fontSize: `${fS}px`,
                           fontWeight: "bold",
-                          fill: isSelected ? "#0369a1" : "#3f3f46",
+                          fill: isSelected ? (isDark ? "#38bdf8" : "#0369a1") : MAP_THEME.labelFill,
                           paintOrder: "stroke fill",
-                          stroke: "#ffffff",
+                          stroke: MAP_THEME.labelStroke,
                           strokeWidth: 1.5 / zoomFactor,
                           pointerEvents: "auto" // Makes the text clickable!
                         }}
@@ -883,8 +917,8 @@ export default function IndiaMap({
                         fontFamily: "monospace",
                         fontSize: `${subFs}px`,
                         fontWeight: "600",
-                        fill: "#1e293b",
-                        stroke: "#ffffff",
+                        fill: MAP_THEME.clusterLabel,
+                        stroke: MAP_THEME.clusterLabelStroke,
                         strokeWidth: 0.35 / zoomFactor,
                         paintOrder: "stroke fill",
                         pointerEvents: "none",
@@ -899,8 +933,8 @@ export default function IndiaMap({
                         style={{
                           fontFamily: "monospace",
                           fontSize: `${fs * 0.85}px`,
-                          fill: "#64748b",
-                          stroke: "#ffffff",
+                          fill: MAP_THEME.clusterSub,
+                          stroke: MAP_THEME.clusterLabelStroke,
                           strokeWidth: 0.25 / zoomFactor,
                           paintOrder: "stroke fill",
                           pointerEvents: "none",

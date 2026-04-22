@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
-import { Search, Filter, ChevronRight, AlertTriangle, Activity, X } from "lucide-react";
+import { Search, Filter, ChevronRight, X, ChevronDown, ChevronUp } from "lucide-react";
 import { useLiveData } from "@/lib/context/LiveDataContext";
 import ConstituencyCard from "./ConstituencyCard";
 import StateOverview from "./StateOverview";
@@ -21,6 +21,7 @@ export default function IntelPane({
   const [partyFilter, setPartyFilter] = useState("ALL");
   const [sortMode, setSortMode] = useState<SortMode>("VOLATILITY");
   const [pendingCandidate, setPendingCandidate] = useState<any | null>(null);
+  const [hotspotsOpenMobile, setHotspotsOpenMobile] = useState(false);
   const { constituencies, candidates, signals, ensureCandidatesForPrefixes } = useLiveData();
   
   useEffect(() => {
@@ -32,20 +33,21 @@ export default function IntelPane({
       if (!cand) return;
       const seatId = String(cand.constituency_id || "");
       const seat = seatId ? (constituencies as any[]).find((x: any) => String(x?.id) === seatId) || null : null;
-      if (seat?.state) setGlobalStateFilter(seat.state);
-      if (seatId) {
-        // Let parent reset state, then set constituency + pending candidate to open dossier.
+      // Only change state/constituency when the candidate lives in a DIFFERENT seat
+      // than what the user is already viewing. This prevents scroll/context jumps when
+      // opening a dossier for the seat already selected (e.g., from Insights).
+      const currentSeatId = String(globalConstituencyId || "");
+      if (seatId && seatId !== currentSeatId) {
+        if (seat?.state) setGlobalStateFilter(seat.state);
         setTimeout(() => setGlobalConstituencyId(seatId), 50);
       }
       setPendingCandidate(cand);
     };
     window.addEventListener("openCandidateDossier", onOpen);
     return () => window.removeEventListener("openCandidateDossier", onOpen);
-  }, [candidates, constituencies, setGlobalConstituencyId, setGlobalStateFilter]);
+  }, [candidates, constituencies, setGlobalConstituencyId, setGlobalStateFilter, globalConstituencyId]);
 
   const activeState = globalStateFilter;
-  const SHOW_PENDING_BANNER = process.env.NEXT_PUBLIC_SHOW_PENDING_BANNER !== "false";
-  const isPendingState = SHOW_PENDING_BANNER && (activeState === "Tamil Nadu" || activeState === "West Bengal" || activeState === "ALL");
 
   const stateConstituencies = activeState === "ALL" ? constituencies : constituencies.filter((c: any) => c.state === activeState);
 
@@ -192,11 +194,16 @@ export default function IntelPane({
 
   if (selectedConstituency) {
     return (
-      <aside className="flex min-h-0 flex-1 flex-col w-full overflow-hidden bg-[var(--surface-1)] border-l border-[color:var(--border)]">
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-[color:var(--border)] shrink-0">
-          <button onClick={() => setGlobalConstituencyId(null)} className="font-mono text-[10px] text-[#16a34a] hover:text-[#16a34a]/80 transition-colors">← BACK</button>
-          <span className="font-mono text-[10px] text-[var(--text-muted)]">/</span>
-          <span className="font-mono text-[10px] text-[var(--text-secondary)] truncate">{selectedConstituency.name.toUpperCase()}</span>
+      <aside className="flex min-h-0 flex-1 flex-col w-full overflow-hidden bg-[var(--surface-1)]">
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-[color:var(--border)] shrink-0">
+          <button
+            onClick={() => setGlobalConstituencyId(null)}
+            className="text-[12px] font-medium text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+          >
+            ← Back
+          </button>
+          <span className="text-[12px] text-[var(--text-muted)]">/</span>
+          <span className="text-[13px] font-semibold tracking-[-0.01em] text-[var(--text-primary)] truncate">{selectedConstituency.name}</span>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y pb-20 max-md:pb-28">
           <ConstituencyCard
@@ -210,33 +217,35 @@ export default function IntelPane({
   }
 
   return (
-    <aside className="flex min-h-0 flex-1 flex-col w-full overflow-hidden bg-[var(--surface-1)] border-l border-[color:var(--border)]">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-[color:var(--border)] shrink-0 bg-[var(--surface-1)]">
+    <aside className="flex min-h-0 flex-1 flex-col w-full overflow-hidden bg-[var(--surface-1)]">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-[color:var(--border)] shrink-0 bg-[var(--surface-1)]">
+        <h2 className="text-[14px] font-semibold tracking-[-0.01em] text-[var(--text-primary)]">Seats</h2>
         <div className="flex items-center gap-2">
-          <Filter className="h-3.5 w-3.5 text-[#0284c7]" />
-          <span className="font-mono text-xs font-bold text-[#0284c7] tracking-wider">INTEL PANE</span>
-        </div>
-        <div className="flex items-center gap-2">
-          {typeof onBackToMap === "function" && activeState !== "ALL" ? (
+          {typeof onBackToMap === "function" ? (
             <button
               type="button"
               onClick={onBackToMap}
-              className="md:hidden rounded-md border border-[color:var(--border)] bg-[var(--surface-1)] px-2 py-1 font-mono text-[10px] font-bold text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+              className="eb-btn-ghost lg:hidden flex items-center gap-1"
+              title="Switch to map view"
             >
-              ← MAP
+              <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M1 4l4-2 6 3 4-2v9l-4 2-6-3-4 2V4z" /><path d="M5 2v9M11 5v9" />
+              </svg>
+              <span>View map</span>
             </button>
           ) : null}
-          <span className="font-mono text-[10px] text-[var(--text-muted)]">{sorted.length} seats</span>
+          <span className="text-[11px] text-[var(--text-muted)] num font-mono tabular-nums">
+            {sorted.length} {sorted.length === 1 ? "seat" : "seats"}
+          </span>
         </div>
       </div>
 
-      <div className="flex border-b border-[color:var(--border)] overflow-x-auto shrink-0 bg-[var(--surface-2)]">
+      <div className="hidden md:flex border-b border-[color:var(--border)] overflow-x-auto no-scrollbar shrink-0 bg-[var(--surface-1)] px-2 py-2 gap-1">
         <button
           onClick={() => { setGlobalStateFilter("ALL"); setSearchQuery(""); setGlobalConstituencyId(null); setPartyFilter("ALL"); }}
-          style={{ color: activeState === "ALL" ? "#16a34a" : "#71717a", borderBottomColor: activeState === "ALL" ? "#16a34a" : "transparent", backgroundColor: activeState === "ALL" ? "#16a34a15" : "transparent" }}
-          className="flex-1 min-w-[50px] px-2 py-1.5 font-mono text-[10px] font-bold transition-colors border-b-2 hover:bg-[var(--surface-1)]"
-        >ALL</button>
-
+          data-active={activeState === "ALL"}
+          className="eb-pill shrink-0"
+        >All</button>
         {Array.from(new Set(constituencies.map((c: any) => c.state))).filter(Boolean).map((state: any) => {
           const meta = STATE_META[state];
           const isActive = activeState === state;
@@ -244,24 +253,63 @@ export default function IntelPane({
             <button
               key={state}
               onClick={() => { setGlobalStateFilter(state); setSearchQuery(""); setGlobalConstituencyId(null); setPartyFilter("ALL"); }}
-              style={{ color: isActive ? meta?.color : "#71717a", borderBottomColor: isActive ? meta?.color : "transparent", backgroundColor: isActive ? `${meta?.color}10` : "transparent" }}
-              className="flex-1 min-w-[40px] px-2 py-1.5 font-mono text-[10px] font-bold transition-colors border-b-2 hover:bg-[var(--surface-1)]"
+              data-active={isActive}
+              className="eb-pill shrink-0"
             >
-              <div className="truncate">{meta?.abbr || state}</div>
+              {meta?.abbr || state}
             </button>
           );
         })}
       </div>
 
+      <div className="md:hidden border-b border-[color:var(--border)] shrink-0 bg-[var(--surface-1)] px-4 py-3">
+        <label className="flex items-center gap-2">
+          <span className="text-[12px] font-medium text-[var(--text-secondary)]">State</span>
+          <select
+            value={activeState}
+            onChange={(e) => {
+              const v = e.target.value;
+              setGlobalStateFilter(v);
+              setSearchQuery("");
+              setGlobalConstituencyId(null);
+              setPartyFilter("ALL");
+            }}
+            className="h-11 flex-1 rounded-[var(--radius-sm)] border border-[color:var(--border)] bg-[var(--surface-1)] px-3 text-[14px] text-[var(--text-primary)]"
+          >
+            <option value="ALL">All states</option>
+            {Array.from(new Set(constituencies.map((c: any) => c.state))).filter(Boolean).map((state: any) => (
+              <option key={state as string} value={state as string}>
+                {STATE_META[state as string]?.abbr ? `${STATE_META[state as string]!.abbr} — ${state}` : (state as string)}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
       <StateOverview state={activeState} />
 
       <div className="border-b border-[color:var(--border)] shrink-0">
-        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 bg-[var(--surface-2)] px-3 py-2">
-          <span className="flex min-w-0 flex-1 items-center gap-1.5 font-mono text-[10px] font-bold tracking-wider text-[var(--text-secondary)]">
-            <Activity className="h-3 w-3 shrink-0 text-[#dc2626]" />
+        <button
+          type="button"
+          onClick={() => setHotspotsOpenMobile((v) => !v)}
+          aria-expanded={hotspotsOpenMobile}
+          className="md:hidden hit-44 flex w-full items-center justify-between gap-2 bg-[var(--surface-1)] px-4 py-3 text-left"
+        >
+          <span className="flex items-center gap-2">
+            <span className="text-[13px] font-semibold text-[var(--text-primary)]">Most-discussed · last 6h</span>
+            {hotspots.length ? (
+              <span className="rounded-full border border-[color:var(--border)] bg-[var(--surface-2)] px-1.5 py-0.5 num font-mono text-[11px] font-medium text-[var(--text-secondary)]">{hotspots.length}</span>
+            ) : null}
+          </span>
+          {hotspotsOpenMobile ? <ChevronUp className="h-4 w-4 text-[var(--text-muted)]" /> : <ChevronDown className="h-4 w-4 text-[var(--text-muted)]" />}
+        </button>
+
+        <div className={`${hotspotsOpenMobile ? "block" : "hidden"} md:block`}>
+        <div className="max-md:hidden flex flex-wrap items-center justify-between gap-x-2 gap-y-1 bg-[var(--surface-1)] px-4 py-2.5 border-t border-[color:var(--border)]">
+          <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[12px] font-semibold text-[var(--text-secondary)]">
             <span className="flex min-w-0 flex-wrap items-center gap-1">
-              <span className="whitespace-nowrap">HOTSPOTS (LAST 6H)</span>
-              <IntelHelpTip label="What are hotspots?">
+              <span className="whitespace-nowrap">Most-discussed · last 6h</span>
+              <IntelHelpTip label="What is this?">
                 <span className="mb-2 block font-semibold text-white">Hotspots (last 6 hours)</span>
                 <span className="mb-2 block text-zinc-200">
                   <strong className="text-zinc-50">In plain words:</strong> these are seats where this dashboard is seeing a <em>jump in recent election-related alerts</em> compared with the six hours just before. Think of it as “where attention moved lately,” not as a verdict on what is true on the ground.
@@ -275,7 +323,7 @@ export default function IntelPane({
               </IntelHelpTip>
             </span>
           </span>
-          <span className="shrink-0 font-mono text-[9px] text-[var(--text-muted)]">TAP TO FOCUS</span>
+          <span className="shrink-0 text-[11px] text-[var(--text-muted)]">Tap to open</span>
         </div>
         {hotspots.length > 0 ? (
           <div className="px-2 pb-2">
@@ -291,24 +339,26 @@ export default function IntelPane({
                     setGlobalConstituencyId(h.id);
                   }
                 }}
-                className="w-full flex items-center gap-2 px-2 py-2 rounded hover:bg-[var(--surface-2)] transition-colors text-left"
+                className="w-full flex items-center gap-2.5 px-2 py-2 rounded-[var(--radius-sm)] hover:bg-[var(--surface-2)] transition-colors text-left"
+                title={h.delta >= 3 ? "Many more alerts than 6h earlier" : h.delta >= 1 ? "More alerts than 6h earlier" : "Similar or fewer alerts than 6h earlier"}
               >
-                <div className={`h-2 w-2 rounded-full shrink-0 ${h.delta >= 3 ? "bg-[#dc2626]" : h.delta >= 1 ? "bg-[#ea580c]" : "bg-[#16a34a]"}`} />
+                <div className={`h-1.5 w-1.5 rounded-full shrink-0 ${h.delta >= 3 ? "bg-[var(--danger)]" : h.delta >= 1 ? "bg-[var(--warning)]" : "bg-[var(--text-muted)]"}`} />
                 <div className="flex-1 min-w-0">
-                  <div className="font-mono text-[10px] text-[var(--text-primary)] truncate">{h.name}</div>
-                  <div className="font-mono text-[8px] text-[var(--text-muted)]">
-                    vs prior 6h: {h.delta >= 0 ? `+${h.delta}` : h.delta} · this 6h strength: {h.recent}
+                  <div className="text-[13px] font-medium text-[var(--text-primary)] truncate">{h.name}</div>
+                  <div className="text-[11px] text-[var(--text-muted)]">
+                    <span className="num font-mono tabular-nums">{h.delta >= 0 ? `+${h.delta}` : h.delta}</span> vs earlier · <span className="num font-mono tabular-nums">{h.recent}</span> alerts
                   </div>
                 </div>
-                <ChevronRight className="h-3 w-3 text-[var(--text-muted)] shrink-0" />
+                <ChevronRight className="h-4 w-4 text-[var(--text-muted)] shrink-0" />
               </button>
             ))}
           </div>
         ) : (
-          <div className="px-3 py-2 text-[10px] text-[var(--text-muted)] leading-snug">
-            No hotspots right now—news may be quiet, or alerts are not yet linked to a seat on the map.
+          <div className="px-4 py-2.5 text-[12px] text-[var(--text-muted)] leading-snug">
+            Quiet here — no alert spikes in the last 6 hours.
           </div>
         )}
+        </div>
       </div>
 
       {/* {isPendingState && (
@@ -320,24 +370,25 @@ export default function IntelPane({
         </div>
       )} */}
 
-      <div className="px-2 py-2 border-b border-[color:var(--border)] shrink-0 flex flex-col gap-2 bg-[var(--surface-2)]">
-        <div className="flex items-center gap-1.5 px-2 py-1 bg-[var(--surface-1)] border border-[color:var(--border)] rounded-md text-[10px]">
-          <Search className="h-3 w-3 text-[var(--text-muted)] shrink-0" />
+      <div className="px-4 py-3 border-b border-[color:var(--border)] shrink-0 flex flex-col gap-2.5 bg-[var(--surface-1)]">
+        <div className="flex h-10 items-center gap-2 px-2.5 bg-[var(--surface-2)] border border-[color:var(--border)] rounded-[var(--radius-sm)] focus-within:border-[color:var(--border-strong)] focus-within:bg-[var(--surface-1)] transition-colors md:h-9">
+          <Search className="h-4 w-4 text-[var(--text-muted)] shrink-0" aria-hidden="true" />
           <input
             type="text"
-            placeholder="Search candidate or constituency..."
+            placeholder="Search seat or candidate"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="flex-1 bg-transparent text-[var(--text-primary)] placeholder-[color:var(--text-muted)] outline-none font-mono text-[10px]"
+            aria-label="Search"
+            className="flex-1 bg-transparent text-[var(--text-primary)] placeholder-[color:var(--text-muted)] outline-none text-[13px]"
           />
           {searchQuery ? (
             <button
               type="button"
               onClick={() => setSearchQuery("")}
-              className="rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
+              className="rounded-[var(--radius-sm)] p-1 text-[var(--text-muted)] hover:bg-[var(--surface-3)]"
               aria-label="Clear search"
             >
-              <X className="h-3 w-3" />
+              <X className="h-4 w-4" />
             </button>
           ) : null}
         </div>
@@ -345,13 +396,13 @@ export default function IntelPane({
         {(candidateMatches.length > 0 || constituencyMatches.length > 0) && (
           <div className="rounded-md border border-[color:var(--border)] bg-[var(--surface-1)] overflow-hidden">
             <div className="px-2 py-1 border-b border-[color:var(--border)] flex items-center justify-between">
-              <span className="font-mono text-[9px] font-bold text-[var(--text-secondary)] tracking-wider">SEARCH RESULTS</span>
-              <span className="font-mono text-[8px] text-[var(--text-muted)]">tap to open</span>
+              <span className="text-[11px] font-semibold text-[var(--text-secondary)]">Results</span>
+              <span className="text-[11px] text-[var(--text-muted)]">Tap to open</span>
             </div>
-            <div className="max-h-[220px] overflow-y-auto pretty-scroll">
+            <div className="max-h-[260px] overflow-y-auto pretty-scroll">
               {candidateMatches.length > 0 ? (
                 <div className="px-2 py-1">
-                  <div className="font-mono text-[8px] text-[var(--text-muted)] tracking-wider mb-1">CANDIDATES</div>
+                  <div className="text-[11px] text-[var(--text-muted)] mb-1">People</div>
                   {candidateMatches.map((c) => (
                     <button
                       key={c.id}
@@ -361,16 +412,16 @@ export default function IntelPane({
                         if (c.state && c.state !== activeState) setGlobalStateFilter(c.state);
                         setTimeout(() => setGlobalConstituencyId(c.constituency_id), 50);
                       }}
-                      className="w-full rounded-md px-2 py-1.5 text-left hover:bg-[var(--surface-2)]"
+                      className="w-full rounded-md px-2 py-2 text-left hover:bg-[var(--surface-2)]"
                     >
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0">
-                          <div className="font-mono text-[10px] font-bold text-[var(--text-primary)] truncate">{c.name}</div>
-                          <div className="font-mono text-[8px] text-[var(--text-muted)] truncate">
-                            {String(c.constituency).toUpperCase()} · {String(c.state).toUpperCase()}
+                          <div className="text-[13px] font-semibold text-[var(--text-primary)] truncate">{c.name}</div>
+                          <div className="text-[11px] text-[var(--text-muted)] truncate">
+                            {c.constituency} · {c.state}
                           </div>
-                          <div className="mt-0.5 font-mono text-[8px] font-bold text-[var(--text-secondary)] truncate">
-                            {c.is_independent ? "INDEPENDENT" : String(c.party || "").toUpperCase()}
+                          <div className="mt-0.5 text-[11px] font-medium text-[var(--text-secondary)] truncate">
+                            {c.is_independent ? "Independent" : (c.party || "—")}
                           </div>
                         </div>
                       </div>
@@ -381,7 +432,7 @@ export default function IntelPane({
 
               {constituencyMatches.length > 0 ? (
                 <div className="px-2 py-1 border-t border-[color:var(--border)]">
-                  <div className="font-mono text-[8px] text-[var(--text-muted)] tracking-wider mb-1">CONSTITUENCIES</div>
+                  <div className="text-[11px] text-[var(--text-muted)] mb-1">Seats</div>
                   {constituencyMatches.map((c) => (
                     <button
                       key={c.id}
@@ -390,14 +441,14 @@ export default function IntelPane({
                         if (c.state && c.state !== activeState) setGlobalStateFilter(c.state);
                         setTimeout(() => setGlobalConstituencyId(c.id), 50);
                       }}
-                      className="w-full rounded-md px-2 py-1.5 text-left hover:bg-[var(--surface-2)]"
+                      className="w-full rounded-md px-2 py-2 text-left hover:bg-[var(--surface-2)]"
                     >
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0">
-                          <div className="font-mono text-[10px] font-bold text-[var(--text-primary)] truncate">{c.name}</div>
-                          <div className="font-mono text-[8px] text-[var(--text-muted)] truncate">{String(c.state).toUpperCase()}</div>
+                          <div className="text-[13px] font-semibold text-[var(--text-primary)] truncate">{c.name}</div>
+                          <div className="text-[11px] text-[var(--text-muted)] truncate">{c.state}</div>
                         </div>
-                        <ChevronRight className="h-3 w-3 text-[var(--text-muted)] shrink-0" />
+                        <ChevronRight className="h-4 w-4 text-[var(--text-muted)] shrink-0" />
                       </div>
                     </button>
                   ))}
@@ -407,24 +458,32 @@ export default function IntelPane({
           </div>
         )}
 
-        <div className="flex items-center gap-1.5">
-          <Filter className="h-2.5 w-2.5 text-[var(--text-muted)] shrink-0 ml-1" />
-          <select value={partyFilter} onChange={(e) => setPartyFilter(e.target.value)} className="flex-1 bg-[var(--surface-1)] border border-[color:var(--border)] rounded-md px-1.5 py-1 font-mono text-[9px] font-bold text-[var(--text-secondary)] outline-none">
-            <option value="ALL">ALL PARTIES</option>
+        <div className="flex items-center gap-2">
+          <Filter className="h-3.5 w-3.5 text-[var(--text-muted)] shrink-0" aria-hidden="true" />
+          <select
+            value={partyFilter}
+            onChange={(e) => setPartyFilter(e.target.value)}
+            aria-label="Filter by party"
+            className="h-9 flex-1 min-w-0 max-w-full rounded-[var(--radius-sm)] border border-[color:var(--border)] bg-[var(--surface-1)] px-2.5 text-[12px] font-medium text-[var(--text-primary)] outline-none hover:border-[color:var(--border-strong)] transition-colors truncate"
+            style={{ textOverflow: "ellipsis" }}
+          >
+            <option value="ALL">All parties</option>
             {uniqueParties.map(party => (
-              <option key={party} value={party}>{party}</option>
+              <option key={party} value={party}>
+                {party.length > 32 ? party.slice(0, 30) + "…" : party}
+              </option>
             ))}
-            <option value="IND">INDEPENDENTS</option>
+            <option value="IND">Independents</option>
           </select>
         </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y pb-20 max-md:pb-28">
-        <div className="sticky top-0 z-10 px-2 py-2 flex justify-between items-center bg-[var(--surface-2)]/95 backdrop-blur border-b border-[color:var(--border)]">
-          <span className="font-mono text-[8px] text-[var(--text-muted)] tracking-wider flex items-center gap-1">
-            SORT METRIC
-            <IntelHelpTip label="What is volatility?">
-              <span className="mb-2 block font-semibold text-white">Volatility index (0 to 100)</span>
+        <div className="sticky top-0 z-10 px-4 py-2 flex justify-between items-center bg-[var(--surface-1)]/95 backdrop-blur border-b border-[color:var(--border)]">
+          <span className="text-[11px] text-[var(--text-muted)] flex items-center gap-1">
+            Sort by
+            <IntelHelpTip label="What is activity?">
+              <span className="mb-2 block font-semibold text-white">Activity score (0 to 100)</span>
               <span className="mb-2 block text-zinc-200">
                 <strong className="text-zinc-50">In plain words:</strong> a rough “how heated does this seat look on paper <em>inside this app</em>?” score. Higher usually means a busier contest (more candidates than a simple two-way fight), more declared criminal cases in the data we imported from affidavits, and/or more recent alerts linked to that seat. Lower means calmer by those same measures.
               </span>
@@ -436,52 +495,64 @@ export default function IntelPane({
               </span>
             </IntelHelpTip>
           </span>
-          <select value={sortMode} onChange={(e) => setSortMode(e.target.value as SortMode)} className="bg-transparent font-mono text-[9px] font-bold text-[var(--text-secondary)] outline-none cursor-pointer">
-            <option value="VOLATILITY">VOLATILITY (DESC)</option>
-            <option value="NAME">CONSTITUENCY NAME (A-Z)</option>
-            <option value="PHASE">ELECTION PHASE</option>
+          <select value={sortMode} onChange={(e) => setSortMode(e.target.value as SortMode)} className="bg-transparent text-[12px] font-medium text-[var(--text-secondary)] outline-none cursor-pointer hover:text-[var(--text-primary)] transition-colors">
+            <option value="VOLATILITY">Most active</option>
+            <option value="NAME">Name (A–Z)</option>
+            <option value="PHASE">Voting phase</option>
           </select>
         </div>
 
-        {sorted.length > 0 ? sorted.map((c) => (
+        {sorted.length > 0 ? sorted.map((c) => {
+          const v = c.volatility_score || 0
+          const candN = candCountBySeat.get(String(c.id)) || 0
+          const crimN = crimCountBySeat.get(String(c.id)) || 0
+          const activityLabel = v >= 70 ? "Very active" : v >= 40 ? "Active" : "Calm"
+          const activityColor = v >= 70 ? "var(--danger)" : v >= 40 ? "var(--warning)" : "var(--text-muted)"
+          return (
           <button
             key={c.id}
             onClick={() => {
               if (c.state && c.state !== activeState) {
-                // 1. Change the map state first
                 setGlobalStateFilter(c.state);
-
-                // 2. Wait 50ms for the parent components to finish their reset logic, 
-                // THEN apply the constituency ID so it sticks permanently.
                 setTimeout(() => {
                   setGlobalConstituencyId(c.id);
                 }, 50);
               } else {
-                // If we are already in the correct state view, just set it instantly
                 setGlobalConstituencyId(c.id);
               }
             }}
-            className="flex items-center w-full px-3 py-2 hover:bg-[var(--surface-2)] transition-colors border-b border-[color:var(--border)] group text-left"
+            className="flex items-center w-full min-h-[60px] px-4 py-2.5 hover:bg-[var(--surface-2)] transition-colors border-b border-[color:var(--border)] group text-left"
+            title={`${activityLabel} · ${candN} candidates · ${crimN > 0 ? `${crimN} with declared cases` : "no declared cases"}`}
           >
-            <div className="h-6 w-1 rounded-full mr-2.5 shrink-0" style={{ backgroundColor: (c.volatility_score || 0) >= 70 ? "#dc2626" : (c.volatility_score || 0) >= 40 ? "#ea580c" : "#16a34a" }} />
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between gap-2">
-                <span className="font-mono text-[10px] text-[var(--text-primary)] truncate group-hover:text-[#16a34a] transition-colors">{c.name}</span>
-                <span className="font-mono text-[8px] text-[var(--text-muted)] shrink-0">#{c.id?.split('-')[1] || "0"}</span>
-              </div>
-              <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
-                <span className="font-mono text-[8px] text-[var(--text-muted)]">VOL {(c.volatility_score || 0).toFixed(0)}%</span>
-                <span className="font-mono text-[8px] text-[var(--text-muted)]">PH-{c.phase}</span>
-                <span className="font-mono text-[8px] text-[var(--text-muted)]">{candCountBySeat.get(String(c.id)) || 0} cands</span>
-                <span className={`font-mono text-[8px] ${(crimCountBySeat.get(String(c.id)) || 0) > 0 ? "text-[#dc2626]" : "text-[#16a34a]"}`}>
-                  {(crimCountBySeat.get(String(c.id)) || 0) > 0 ? `${crimCountBySeat.get(String(c.id))} crim` : "clean"}
+                <span className="text-[14px] font-semibold tracking-[-0.005em] text-[var(--text-primary)] truncate">{c.name}</span>
+                <span className="num font-mono tabular-nums text-[11px] text-[var(--text-muted)] shrink-0">
+                  Ph <span className="num font-mono tabular-nums">{c.phase}</span>
                 </span>
               </div>
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px] text-[var(--text-muted)]">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: activityColor }} aria-hidden />
+                  {activityLabel}
+                </span>
+                <span>·</span>
+                <span><span className="num font-mono tabular-nums text-[var(--text-secondary)]">{candN}</span> candidates</span>
+                {crimN > 0 ? (
+                  <>
+                    <span>·</span>
+                    <span><span className="num font-mono tabular-nums text-[var(--danger)]">{crimN}</span> with cases</span>
+                  </>
+                ) : null}
+              </div>
             </div>
-            <ChevronRight className="h-3 w-3 text-[var(--text-muted)] group-hover:text-[var(--text-muted)] shrink-0 transition-colors" />
+            <ChevronRight className="h-4 w-4 text-[var(--text-muted)] shrink-0 ml-2 group-hover:text-[var(--text-primary)] transition-colors" />
           </button>
-        )) : (
-          <div className="p-6 text-center font-mono text-[10px] text-[#a1a1aa]">No matches found.</div>
+          )
+        }) : (
+          <div className="p-8 text-center text-[13px] text-[var(--text-muted)]">
+            No matches. Try a different state, party, or search.
+          </div>
         )}
       </div>
     </aside>
