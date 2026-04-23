@@ -401,9 +401,9 @@ html.dark .eb-insights-hero::before {
 .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
 .pb-nav-safe { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
 
-@media (max-width: 767px) {
+@media (max-width: 819px) {
   :root {
-    /* Mobile: tab bar only (BottomBar hidden on small screens) */
+    /* Phone: bottom tab bar (matches AppShell !isTabletUp) */
     --map-footer-stack: 56px;
   }
 }
