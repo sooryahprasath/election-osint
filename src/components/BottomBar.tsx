@@ -28,7 +28,7 @@ export default function BottomBar() {
 
   return (
     <>
-      <footer className="fixed bottom-0 left-0 right-0 z-50 hidden h-7 items-center justify-between border-t border-[color:var(--border)] bg-[var(--surface-1)] px-4 text-[12px] text-[var(--text-muted)] select-none lg:flex">
+      <footer className="fixed bottom-0 left-0 right-0 z-50 hidden h-7 min-[820px]:flex items-center justify-between border-t border-[color:var(--border)] bg-[var(--surface-1)] px-4 text-[12px] text-[var(--text-muted)] select-none">
         <div className="flex items-center gap-1.5">
           <span className="relative inline-flex h-1.5 w-1.5">
             <span className="absolute inline-flex h-full w-full rounded-full bg-[var(--brand)] opacity-70 animate-pulse"></span>
